@@ -6,6 +6,7 @@
         android:icon="@android:drawable/ic_menu_edit"
         android:label="anndoodle"
         android:supportsRtl="true"
+        android:largeHeap="true"
         android:theme="@style/Theme.Anndoodle">
 
         <activity

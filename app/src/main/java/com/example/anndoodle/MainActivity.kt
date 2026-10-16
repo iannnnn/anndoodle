@@ -2,6 +2,7 @@ package com.example.anndoodle
 
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -15,9 +16,14 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -36,14 +42,20 @@ class MainActivity : AppCompatActivity() {
     private var selectedColorIndex = 0
     private var isTransparentBg = true
 
+    private val PREFS_NAME = "anndoodle_prefs"
+    private val PREF_RATIO_KEY = "canvas_ratio"
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         val rootLayout = findViewById<FrameLayout>(R.id.root_layout)
         val doodleView = findViewById<DoodleView>(R.id.doodle_view)
+        val btnRatio = findViewById<MaterialButton>(R.id.btn_ratio)
         val btnBgToggle = findViewById<MaterialButton>(R.id.btn_bg_toggle)
         val btnZoomReset = findViewById<MaterialButton>(R.id.btn_zoom_reset)
+        val btnUndo = findViewById<MaterialButton>(R.id.btn_undo)
+        val btnRedo = findViewById<MaterialButton>(R.id.btn_redo)
         val btnEraser = findViewById<MaterialButton>(R.id.btn_eraser)
         val btnClear = findViewById<MaterialButton>(R.id.btn_clear)
         val btnDone = findViewById<MaterialButton>(R.id.btn_done)
@@ -51,6 +63,8 @@ class MainActivity : AppCompatActivity() {
         val colorContainer = findViewById<LinearLayout>(R.id.color_container)
         val floatingToolbar = findViewById<MaterialCardView>(R.id.floating_toolbar)
         val dragHandle = findViewById<View>(R.id.drag_handle_area)
+
+        setupCanvasRatio(doodleView, btnRatio)
 
         setupColorSwatches(colorContainer, doodleView, btnEraser)
 
@@ -68,6 +82,34 @@ class MainActivity : AppCompatActivity() {
             doodleView.resetZoom()
         }
 
+        // Undo & Redo setup
+        btnUndo.setOnClickListener {
+            doodleView.undo()
+        }
+        btnRedo.setOnClickListener {
+            doodleView.redo()
+        }
+
+        doodleView.onUndoRedoStateChanged = { canUndo, canRedo ->
+            btnUndo.isEnabled = canUndo
+            btnUndo.alpha = if (canUndo) 1.0f else 0.35f
+            btnRedo.isEnabled = canRedo
+            btnRedo.alpha = if (canRedo) 1.0f else 0.35f
+        }
+        // Initial button states
+        btnUndo.isEnabled = false
+        btnUndo.alpha = 0.35f
+        btnRedo.isEnabled = false
+        btnRedo.alpha = 0.35f
+
+        // Multi-finger gesture feedback
+        doodleView.onUndoTriggered = {
+            Toast.makeText(this, "⤺ เลิกทำ (Undo)", Toast.LENGTH_SHORT).show()
+        }
+        doodleView.onRedoTriggered = {
+            Toast.makeText(this, "⤻ ทำซ้ำ (Redo)", Toast.LENGTH_SHORT).show()
+        }
+
         sliderBrush.addOnChangeListener { _, value, _ ->
             doodleView.brushSize = value
         }
@@ -83,10 +125,74 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnDone.setOnClickListener {
-            saveAndPinWidget(doodleView)
+            saveAndPinWidget(doodleView, btnDone)
         }
 
         setupDraggableToolbar(dragHandle, floatingToolbar)
+    }
+
+    private fun setupCanvasRatio(doodleView: DoodleView, btnRatio: MaterialButton) {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        var initialRatio = CanvasRatio.fromKey(prefs.getString(PREF_RATIO_KEY, CanvasRatio.SQUARE.key))
+
+        // Check if opened from an existing widget
+        val appWidgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+        if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            val appWidgetManager = AppWidgetManager.getInstance(this)
+            val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
+            val minW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
+            val minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
+
+            if (minW > 0 && minH > 0) {
+                val detectedRatio = minW.toFloat() / minH.toFloat()
+                initialRatio = when {
+                    detectedRatio in 0.85f..1.15f -> CanvasRatio.SQUARE
+                    detectedRatio in 1.15f..1.55f -> CanvasRatio.STANDARD
+                    detectedRatio in 1.55f..1.85f -> CanvasRatio.WIDE
+                    detectedRatio > 1.85f -> CanvasRatio.BANNER
+                    else -> CanvasRatio.SQUARE
+                }
+            }
+        }
+
+        doodleView.setCanvasRatio(initialRatio)
+        updateRatioButtonLabel(btnRatio, initialRatio)
+
+        val ratioList = listOf(
+            CanvasRatio.SQUARE to "1:1 (จัตุรัส — สำหรับ Widget 2x2, 3x3)",
+            CanvasRatio.STANDARD to "4:3 (แนวกว้าง — สำหรับ Widget 4x3)",
+            CanvasRatio.WIDE to "16:9 (แถบกว้าง — สำหรับ Widget 4x2, 5x2)",
+            CanvasRatio.BANNER to "2:1 (แถบยาว — สำหรับ Widget 4x2 แนวนอน)",
+            CanvasRatio.FULLSCREEN to "เต็มจอ (ตามขนาดหน้าจอเครื่อง)"
+        )
+
+        btnRatio.setOnClickListener {
+            val currentIndex = ratioList.indexOfFirst { it.first == doodleView.canvasRatio }
+            val titles = ratioList.map { it.second }.toTypedArray()
+
+            MaterialAlertDialogBuilder(this)
+                .setTitle("เลือกสัดส่วน Widget / Canvas")
+                .setSingleChoiceItems(titles, currentIndex) { dialog, which ->
+                    val selected = ratioList[which].first
+                    doodleView.setCanvasRatio(selected)
+                    prefs.edit().putString(PREF_RATIO_KEY, selected.key).apply()
+                    updateRatioButtonLabel(btnRatio, selected)
+                    dialog.dismiss()
+                }
+                .setNegativeButton("ยกเลิก", null)
+                .show()
+        }
+    }
+
+    private fun updateRatioButtonLabel(button: MaterialButton, ratio: CanvasRatio) {
+        val shortLabel = when (ratio) {
+            CanvasRatio.SQUARE -> "1:1"
+            CanvasRatio.STANDARD -> "4:3"
+            CanvasRatio.WIDE -> "16:9"
+            CanvasRatio.BANNER -> "2:1"
+            CanvasRatio.FULLSCREEN -> "เต็มจอ"
+        }
+        button.text = "สัดส่วน : $shortLabel"
     }
 
     private fun applyBackgroundState(rootLayout: FrameLayout, btnBgToggle: MaterialButton) {
@@ -180,33 +286,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun saveAndPinWidget(doodleView: DoodleView) {
+    private fun saveAndPinWidget(doodleView: DoodleView, btnDone: MaterialButton) {
         val bmp = doodleView.getDoodleBitmap() ?: return
-        val file = File(filesDir, "doodle.png")
-        FileOutputStream(file).use { out ->
-            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-        }
+        btnDone.isEnabled = false
 
-        val appWidgetManager = AppWidgetManager.getInstance(this)
-        val provider = ComponentName(this, DoodleWidget::class.java)
-        val existingIds = appWidgetManager.getAppWidgetIds(provider)
+        // Create immutable copy for background encoding
+        val bmpCopy = bmp.copy(bmp.config, false)
 
-        if (existingIds.isNotEmpty()) {
-            val intent = Intent(this, DoodleWidget::class.java).apply {
-                action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
-                putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, existingIds)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val file = File(filesDir, "doodle.png")
+            FileOutputStream(file).use { out ->
+                bmpCopy.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
-            sendBroadcast(intent)
-            Toast.makeText(this, "อัปเดต Doodle แล้ว!", Toast.LENGTH_SHORT).show()
-            finish()
-        } else {
-            if (appWidgetManager.isRequestPinAppWidgetSupported) {
-                appWidgetManager.requestPinAppWidget(provider, null, null)
-                Toast.makeText(this, "กด 'เพิ่ม' เพื่อวางบนหน้าจอหลัก", Toast.LENGTH_LONG).show()
-            } else {
-                Toast.makeText(this, "บันทึกแล้ว!", Toast.LENGTH_LONG).show()
+            bmpCopy.recycle()
+
+            withContext(Dispatchers.Main) {
+                val appWidgetManager = AppWidgetManager.getInstance(this@MainActivity)
+                val provider = ComponentName(this@MainActivity, DoodleWidget::class.java)
+                val existingIds = appWidgetManager.getAppWidgetIds(provider)
+
+                if (existingIds.isNotEmpty()) {
+                    val intent = Intent(this@MainActivity, DoodleWidget::class.java).apply {
+                        action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
+                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, existingIds)
+                    }
+                    sendBroadcast(intent)
+                    Toast.makeText(this@MainActivity, "อัปเดต Doodle บน Widget แล้ว!", Toast.LENGTH_SHORT).show()
+                    finish()
+                } else {
+                    if (appWidgetManager.isRequestPinAppWidgetSupported) {
+                        appWidgetManager.requestPinAppWidget(provider, null, null)
+                        Toast.makeText(this@MainActivity, "กด 'เพิ่ม' เพื่อวางบนหน้าจอหลัก", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "บันทึกแล้ว!", Toast.LENGTH_LONG).show()
+                    }
+                    finish()
+                }
             }
-            finish()
         }
     }
 }

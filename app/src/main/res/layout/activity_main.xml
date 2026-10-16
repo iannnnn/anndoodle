@@ -11,38 +11,59 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <LinearLayout
-        android:layout_width="wrap_content"
+    <FrameLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_margin="16dp"
-        android:orientation="horizontal">
+        android:layout_margin="16dp">
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_bg_toggle"
+            android:id="@+id/btn_ratio"
             android:layout_width="wrap_content"
             android:layout_height="42dp"
-            android:text="พื้นหลัง : ใส"
+            android:layout_gravity="start|center_vertical"
+            android:text="สัดส่วน : 1:1"
             android:textSize="12sp"
             android:textColor="#FFFFFF"
             app:backgroundTint="#CC1E1E1E"
             app:strokeColor="#33FFFFFF"
             app:strokeWidth="1dp"
-            app:cornerRadius="21dp" />
+            app:cornerRadius="21dp"
+            app:icon="@drawable/ic_aspect_ratio"
+            app:iconTint="#00E5FF"
+            app:iconSize="16dp" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_zoom_reset"
+        <LinearLayout
             android:layout_width="wrap_content"
-            android:layout_height="42dp"
-            android:layout_marginStart="8dp"
-            android:text="100%"
-            android:textSize="12sp"
-            android:textColor="#FFFFFF"
-            app:backgroundTint="#CC1E1E1E"
-            app:strokeColor="#33FFFFFF"
-            app:strokeWidth="1dp"
-            app:cornerRadius="21dp" />
-    </LinearLayout>
+            android:layout_height="wrap_content"
+            android:layout_gravity="end|center_vertical"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_bg_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="พื้นหลัง : ใส"
+                android:textSize="12sp"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#CC1E1E1E"
+                app:strokeColor="#33FFFFFF"
+                app:strokeWidth="1dp"
+                app:cornerRadius="21dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_zoom_reset"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:layout_marginStart="8dp"
+                android:text="100%"
+                android:textSize="12sp"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#CC1E1E1E"
+                app:strokeColor="#33FFFFFF"
+                app:strokeWidth="1dp"
+                app:cornerRadius="21dp" />
+        </LinearLayout>
+    </FrameLayout>
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/floating_toolbar"
@@ -110,10 +131,42 @@
                     app:trackColorInactive="#44FFFFFF" />
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_undo"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="4dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    app:icon="@drawable/ic_undo"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="#E0E0E0"
+                    app:backgroundTint="#383838"
+                    app:cornerRadius="10dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_redo"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="4dp"
+                    android:insetLeft="0dp"
+                    android:insetTop="0dp"
+                    android:insetRight="0dp"
+                    android:insetBottom="0dp"
+                    app:icon="@drawable/ic_redo"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
+                    app:iconTint="#E0E0E0"
+                    app:backgroundTint="#383838"
+                    app:cornerRadius="10dp" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_eraser"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:layout_marginStart="6dp"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="4dp"
                     android:insetLeft="0dp"
                     android:insetTop="0dp"
                     android:insetRight="0dp"
@@ -123,13 +176,13 @@
                     app:iconPadding="0dp"
                     app:iconTint="#E0E0E0"
                     app:backgroundTint="#383838"
-                    app:cornerRadius="12dp" />
+                    app:cornerRadius="10dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_clear"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:layout_marginStart="6dp"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="4dp"
                     android:insetLeft="0dp"
                     android:insetTop="0dp"
                     android:insetRight="0dp"
@@ -139,13 +192,13 @@
                     app:iconPadding="0dp"
                     app:iconTint="#E0E0E0"
                     app:backgroundTint="#383838"
-                    app:cornerRadius="12dp" />
+                    app:cornerRadius="10dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_done"
-                    android:layout_width="52dp"
-                    android:layout_height="44dp"
-                    android:layout_marginStart="8dp"
+                    android:layout_width="48dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="6dp"
                     android:insetLeft="0dp"
                     android:insetTop="0dp"
                     android:insetRight="0dp"
@@ -155,7 +208,7 @@
                     app:iconPadding="0dp"
                     app:iconTint="#000000"
                     app:backgroundTint="#00E676"
-                    app:cornerRadius="12dp" />
+                    app:cornerRadius="10dp" />
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
