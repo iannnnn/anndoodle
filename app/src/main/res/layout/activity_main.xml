@@ -62,6 +62,24 @@
                 app:strokeColor="#33FFFFFF"
                 app:strokeWidth="1dp"
                 app:cornerRadius="21dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_more"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:layout_marginStart="8dp"
+                android:insetLeft="0dp"
+                android:insetTop="0dp"
+                android:insetRight="0dp"
+                android:insetBottom="0dp"
+                app:icon="@drawable/ic_more_horiz"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconTint="#FFFFFF"
+                app:backgroundTint="#CC1E1E1E"
+                app:strokeColor="#33FFFFFF"
+                app:strokeWidth="1dp"
+                app:cornerRadius="21dp" />
         </LinearLayout>
     </FrameLayout>
 
@@ -86,7 +104,7 @@
             <FrameLayout
                 android:id="@+id/drag_handle_area"
                 android:layout_width="match_parent"
-                android:layout_height="28dp"
+                android:layout_height="24dp"
                 android:background="@android:color/transparent">
 
                 <ImageView
@@ -99,13 +117,13 @@
             <HorizontalScrollView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="12dp"
+                android:paddingHorizontal="10dp"
                 android:scrollbars="none">
 
                 <LinearLayout
                     android:id="@+id/color_container"
                     android:layout_width="wrap_content"
-                    android:layout_height="52dp"
+                    android:layout_height="26dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal" />
             </HorizontalScrollView>

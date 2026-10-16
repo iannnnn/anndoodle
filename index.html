@@ -18,6 +18,7 @@
       --text-muted: #9ca3af;
       --accent: #00E676;
       --accent-cyan: #00E5FF;
+      --accent-amber: #FFB300;
       --font-main: 'Plus Jakarta Sans', 'Noto Sans Thai', sans-serif;
     }
 
@@ -279,13 +280,36 @@
       height: 100%;
     }
 
+    .mockup-toolbar {
+      margin-top: 10px;
+      background: rgba(30, 30, 30, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .color-strip-preview {
+      display: flex;
+      gap: 3px;
+      overflow: hidden;
+      justify-content: center;
+    }
+
+    .color-dot {
+      width: 7px;
+      height: 14px;
+      border-radius: 2px;
+    }
+
     .spen-pill {
-      margin-top: 12px;
       background: rgba(255, 255, 255, 0.08);
       border: 1px solid rgba(255, 255, 255, 0.1);
-      padding: 7px 12px;
+      padding: 6px 12px;
       border-radius: 99px;
-      font-size: 11px;
+      font-size: 10px;
       color: var(--accent-cyan);
       display: flex;
       align-items: center;
@@ -314,7 +338,7 @@
 
     /* Features Grid */
     .features {
-      padding: 40px 0 80px;
+      padding: 40px 0 60px;
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
       gap: 20px;
@@ -374,9 +398,97 @@
       line-height: 1.6;
     }
 
+    /* Notice Card (Auto Blocker) */
+    .notice-section {
+      padding: 10px 0 60px;
+    }
+
+    .notice-card {
+      background: linear-gradient(180deg, rgba(35, 28, 18, 0.85), rgba(24, 20, 14, 0.9));
+      border: 1px solid rgba(255, 179, 0, 0.35);
+      border-radius: 22px;
+      padding: 30px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+    }
+
+    .notice-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .notice-icon {
+      font-size: 30px;
+      line-height: 1;
+      padding: 12px;
+      background: rgba(255, 179, 0, 0.15);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 179, 0, 0.3);
+    }
+
+    .notice-header h3 {
+      font-size: 20px;
+      font-weight: 800;
+      color: #FFF3E0;
+      margin-bottom: 6px;
+    }
+
+    .notice-header p {
+      font-size: 14px;
+      color: #FFE082;
+      line-height: 1.5;
+    }
+
+    .notice-steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .notice-step {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 179, 0, 0.15);
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 13.5px;
+      color: #E0E0E0;
+    }
+
+    .notice-step strong {
+      color: #FFF9C4;
+    }
+
+    .notice-step-num {
+      width: 22px;
+      height: 22px;
+      background: var(--accent-amber);
+      color: #000;
+      font-size: 12px;
+      font-weight: 800;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .notice-footer {
+      font-size: 13px;
+      color: #BCAAA4;
+      border-top: 1px dashed rgba(255, 179, 0, 0.2);
+      padding-top: 14px;
+    }
+
     /* Steps Section */
     .steps-section {
-      padding: 20px 0 80px;
+      padding: 20px 0 60px;
     }
 
     .steps-grid {
@@ -500,11 +612,11 @@
       <section class="hero">
         <div class="hero-content">
           <div class="badge-pill">
-            <span>✨ อัปเดตใหม่ v2.1</span> Gesture Undo/Redo & เลือกสัดส่วน Widget
+            <span>✨ New in v2.1</span> 64-Color Bar · Visual Ratio Modal · EN/TH
           </div>
           <h1 class="hero-title">เขียน Doodle ไร้กรอบ <span>ลอยบนหน้าจอหลัก</span></h1>
           <p class="hero-desc">
-            วิดเจ็ตวาดเขียนลายเส้นพื้นหลังใส 100% สำหรับ Android ออกแบบเพื่อ S-Pen โดยเฉพาะ แตะ 2 นิ้วเพื่อ Undo, 3 นิ้วเพื่อ Redo และเลือกสัดส่วนภาพให้พอดีกับขนาด Widget ได้ทันที
+            วิดเจ็ตวาดเขียนลายเส้นพื้นหลังใส 100% สำหรับ Android ออกแบบเพื่อ S-Pen โดยเฉพาะ แตะ 2 นิ้ว Undo / 3 นิ้ว Redo พร้อมแถบสีเพรียวบาง 64 เฉดสี และหน้าต่างเลือกสัดส่วน Widget แบบกราฟิก
           </p>
           <div class="btn-group">
             <a href="https://github.com/iannnnn/anndoodle/releases" target="_blank" rel="noopener noreferrer" id="download-btn" class="btn btn-primary">
@@ -526,18 +638,35 @@
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z"/></svg>
                 WIDGET FRAME · 1:1
               </span>
-              <svg class="doodle-drawing" viewBox="0 0 200 240">
-                <path d="M35 70 Q70 25 110 50 T165 75" stroke="#00E5FF" stroke-width="4" fill="none" stroke-linecap="round"/>
-                <path d="M60 105 Q90 135 145 95" stroke="#FFEE58" stroke-width="3" fill="none" stroke-linecap="round"/>
-                <circle cx="70" cy="145" r="14" stroke="#FF4081" stroke-width="3.5" fill="none"/>
-                <path d="M120 135 L150 175 M150 135 L120 175" stroke="#00E676" stroke-width="4" stroke-linecap="round"/>
-                <path d="M50 195 Q100 215 155 190" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <svg class="doodle-drawing" viewBox="0 0 200 220">
+                <path d="M35 65 Q70 20 110 45 T165 70" stroke="#00E5FF" stroke-width="4" fill="none" stroke-linecap="round"/>
+                <path d="M60 100 Q90 130 145 90" stroke="#FFEE58" stroke-width="3" fill="none" stroke-linecap="round"/>
+                <circle cx="70" cy="140" r="14" stroke="#FF4081" stroke-width="3.5" fill="none"/>
+                <path d="M120 130 L150 170 M150 130 L120 170" stroke="#00E676" stroke-width="4" stroke-linecap="round"/>
+                <path d="M50 185 Q100 205 155 180" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round"/>
               </svg>
               <div class="gesture-badge-container">
                 <span class="gesture-pill">✌️ 2-finger Undo</span>
                 <span class="gesture-pill">🤟 3-finger Redo</span>
               </div>
             </div>
+
+            <!-- Toolbar preview in mockup -->
+            <div class="mockup-toolbar">
+              <div class="color-strip-preview">
+                <div class="color-dot" style="background:#FFF"></div>
+                <div class="color-dot" style="background:#BDBDBD"></div>
+                <div class="color-dot" style="background:#EF5350"></div>
+                <div class="color-dot" style="background:#EC407A"></div>
+                <div class="color-dot" style="background:#AB47BC"></div>
+                <div class="color-dot" style="background:#42A5F5"></div>
+                <div class="color-dot" style="background:#26C6DA"></div>
+                <div class="color-dot" style="background:#66BB6A"></div>
+                <div class="color-dot" style="background:#FFEE58"></div>
+                <div class="color-dot" style="background:#FFA726"></div>
+              </div>
+            </div>
+
             <div class="spen-pill">
               <span>✦</span> S-Pen Pressure Sensitive & Eraser Button
             </div>
@@ -555,6 +684,20 @@
       <section id="features" class="features">
         <div class="feature-card">
           <span class="card-badge">NEW</span>
+          <div class="icon-box">🎨</div>
+          <h3>แถบสีเพรียวบาง 64 เฉดสี (Color Bar)</h3>
+          <p>ปรับโฉมจานสีเป็นทรงสี่เหลี่ยมผอมเรียงต่อกันแนวนอน ลดความสูงแถบเครื่องมือลงไม่เกะกะสายตา พร้อมเพิ่มเฉดสีจุใจถึง 64 สี ทั้งโมโนโครม พาสเทล และสีสด</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="card-badge">NEW</span>
+          <div class="icon-box">📐</div>
+          <h3>Modal สัดส่วน Widget แบบกราฟิก</h3>
+          <p>แตะปุ่มสัดส่วนเพื่อเปิดหน้าต่าง Modal แสดงภาพจำลองทรง Widget สวยงาม (1:1 จัตุรัส, 4:3, 16:9, 2:1 แบนเนอร์, เต็มจอ) เลือกง่าย สบายตา ไร้ตัวหนังสือรก</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="card-badge">NEW</span>
           <div class="icon-box">✌️</div>
           <h3>แตะ 2 นิ้ว Undo / 3 นิ้ว Redo</h3>
           <p>ย้อนกลับและทำซ้ำได้ทันทีด้วย Gesture แตะ 2 นิ้ว หรือ 3 นิ้วบนหน้าจอแบบแอปวาดรูประดับโปร พร้อมระบบตรวจจับล้ำหน้า ป้องกันเส้นเปื้อนเวลาสัมผัส</p>
@@ -562,13 +705,12 @@
 
         <div class="feature-card">
           <span class="card-badge">NEW</span>
-          <div class="icon-box">📐</div>
-          <h3>เลือกสัดส่วน Widget ได้ตรงใจ</h3>
-          <p>เลือกสัดส่วนได้ทั้ง 1:1 (จัตุรัส 2x2, 3x3), 4:3, 16:9, 2:1 หรือเต็มจอ พร้อมกรอบไกด์ขอบโค้งมน ช่วยให้ภาพวาดพอดีกับขนาด Widget บนหน้าจอโฮมเป๊ะ</p>
+          <div class="icon-box">🌐</div>
+          <h3>รองรับ 2 ภาษา (English by Default)</h3>
+          <p>เพิ่มปุ่มเมนู "…" บนแถบเครื่องมือ สามารถแตะเพื่อดูข้อมูลผู้พัฒนา (@iannnnn) และสลับภาษาได้ระหว่างภาษาอังกฤษ (ค่าเริ่มต้น) และภาษาไทย</p>
         </div>
 
         <div class="feature-card">
-          <span class="card-badge">NEW</span>
           <div class="icon-box">🔄</div>
           <h3>หมุนจอไม่เบี้ยว (Rotation-Proof)</h3>
           <p>ใช้ Virtual Canvas สัดส่วนคงที่ ทำให้เมื่อหมุนโทรศัพท์ระหว่างแนวตั้งกับแนวนอน หรือเปิดบนแท็บเล็ต/Galaxy Fold ลายเส้นจะไม่ถูกดึงยืดแน่นอน</p>
@@ -579,17 +721,39 @@
           <h3>รองรับ S-Pen สมบูรณ์แบบ</h3>
           <p>ตรวจจับน้ำหนักแรงกดจริง ให้เส้นหนาบางเป็นธรรมชาติ พร้อมตรวจจับปุ่มข้างปากกา Stylus เพื่อสลับเป็นยางลบอัตโนมัติขณะกด</p>
         </div>
+      </section>
 
-        <div class="feature-card">
-          <div class="icon-box">🎨</div>
-          <h3>จานสี 32 เฉด & Toolbar ย้ายได้</h3>
-          <p>จานสีคัดสรร 32 เฉดสีสวยงาม พร้อมแถบเครื่องมือลอยน้ำ (Floating Toolbar) ที่แตะลากย้ายตำแหน่งไปวางมุมไหนก็ได้ ไม่เกะกะพื้นที่วาด</p>
-        </div>
-
-        <div class="feature-card">
-          <div class="icon-box">⚡</div>
-          <h3>เซฟไว ไร้สะดุด (Background Save)</h3>
-          <p>ประมวลผลการบันทึกภาพด้วย Kotlin Coroutines แยกจาก UI Thread ป้องกันอาการกระตุก พร้อม Memory Object Pool รองรับ Undo/Redo ลื่นไหล</p>
+      <!-- Samsung Auto Blocker Guidance -->
+      <section class="notice-section">
+        <div class="notice-card">
+          <div class="notice-header">
+            <div class="notice-icon">🛡️</div>
+            <div>
+              <h3>ติดปัญหา "การติดตั้งถูกบล็อก" บน Samsung Galaxy? (Auto Blocker)</h3>
+              <p>ใน Samsung One UI 6.0 ขึ้นไป (Android 14+) มีระบบความปลอดภัยชื่อ <strong>"การบล็อกอัตโนมัติ" (Auto Blocker)</strong> เปิดไว้เป็นค่าเริ่มต้น ซึ่งจะบล็อกไฟล์ APK จากนอกสโตร์</p>
+            </div>
+          </div>
+          <div class="notice-steps">
+            <div class="notice-step">
+              <span class="notice-step-num">1</span>
+              <div>เปิด <strong>การตั้งค่า (Settings)</strong> บนเครื่อง Samsung</div>
+            </div>
+            <div class="notice-step">
+              <span class="notice-step-num">2</span>
+              <div>เลือก <strong>ความปลอดภัยและความเป็นส่วนตัว</strong><br><small style="color:#B0BEC5;">(Security and privacy)</small></div>
+            </div>
+            <div class="notice-step">
+              <span class="notice-step-num">3</span>
+              <div>แตะที่ <strong>การบล็อกอัตโนมัติ</strong><br><small style="color:#B0BEC5;">(Auto Blocker)</small></div>
+            </div>
+            <div class="notice-step">
+              <span class="notice-step-num">4</span>
+              <div>สลับเป็น <strong>ปิด (Off)</strong> ชั่วคราว แล้วกดติดตั้ง APK อีกครั้ง</div>
+            </div>
+          </div>
+          <div class="notice-footer">
+            💡 <em>เมื่อติดตั้งเสร็จเรียบร้อยแล้ว คุณสามารถกลับไปเปิด Auto Blocker ไว้ได้ตามเดิมเพื่อความปลอดภัยครับ</em>
+          </div>
         </div>
       </section>
 
