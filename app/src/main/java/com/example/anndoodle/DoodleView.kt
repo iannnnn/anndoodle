@@ -15,6 +15,7 @@ enum class CanvasRatio(val key: String, val title: String, val ratioW: Float, va
     STANDARD("4_3", "4:3 (แนวกว้าง)", 4f, 3f),
     WIDE("16_9", "16:9 (แถบกว้าง)", 16f, 9f),
     BANNER("2_1", "2:1 (แถบยาว)", 2f, 1f),
+    PORTRAIT_5_4("4_5", "5:4 (แนวตั้ง)", 4f, 5f),
     FULLSCREEN("full", "เต็มจอ", 0f, 0f);
 
     fun getTargetDimensions(viewW: Int, viewH: Int): Pair<Int, Int> {
@@ -23,6 +24,7 @@ enum class CanvasRatio(val key: String, val title: String, val ratioW: Float, va
             STANDARD -> Pair(1600, 1200)
             WIDE -> Pair(1920, 1080)
             BANNER -> Pair(1600, 800)
+            PORTRAIT_5_4 -> Pair(1280, 1600)
             FULLSCREEN -> Pair(viewW.coerceAtLeast(720), viewH.coerceAtLeast(720))
         }
     }
@@ -89,6 +91,7 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
 
     var brushSize: Float = 16f
     var isEraser: Boolean = false
+    var isPressureEnabled: Boolean = true
 
     var onZoomChanged: ((Int) -> Unit)? = null
     var onUndoTriggered: (() -> Unit)? = null
@@ -439,14 +442,19 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
                 (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
 
         val useEraser = isEraser || isStylusEraser
-        val pressure = if (isStylus) event.pressure.coerceIn(0.2f, 1.0f) else 0.75f
+        val usePressure = isPressureEnabled && isStylus
+        val pressure = if (usePressure) event.pressure.coerceIn(0.2f, 1.0f) else 1.0f
 
         return if (useEraser) {
             clearPaint.apply { strokeWidth = brushSize * 2.5f }
         } else {
             strokePaint.apply {
                 color = penColor
-                strokeWidth = (brushSize * pressure * 1.3f).coerceAtLeast(2f)
+                strokeWidth = if (usePressure) {
+                    (brushSize * pressure * 1.3f).coerceAtLeast(2f)
+                } else {
+                    brushSize
+                }
             }
         }
     }

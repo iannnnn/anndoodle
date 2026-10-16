@@ -2,14 +2,18 @@ package com.example.anndoodle
 
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -23,6 +27,8 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.slider.Slider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,20 +65,25 @@ class MainActivity : AppCompatActivity() {
     private val PREFS_NAME = "anndoodle_prefs"
     private val PREF_RATIO_KEY = "canvas_ratio"
     private val PREF_LANG_KEY = "app_language"
+    private val PREF_BG_TRANSPARENT_KEY = "canvas_bg_transparent"
+    private val PREF_SPEN_PRESSURE_KEY = "spen_pressure"
 
     private var currentLang = "en" // Default is English
 
     private lateinit var rootLayout: FrameLayout
     private lateinit var doodleView: DoodleView
+    private lateinit var btnDone: MaterialButton
     private lateinit var btnRatio: MaterialButton
-    private lateinit var btnBgToggle: MaterialButton
     private lateinit var btnZoomReset: MaterialButton
     private lateinit var btnMore: MaterialButton
     private lateinit var btnUndo: MaterialButton
     private lateinit var btnRedo: MaterialButton
     private lateinit var btnEraser: MaterialButton
     private lateinit var btnClear: MaterialButton
-    private lateinit var btnDone: MaterialButton
+
+    private enum class SaveBgOption {
+        TRANSPARENT, WHITE, BLACK
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,18 +91,20 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         currentLang = prefs.getString(PREF_LANG_KEY, "en") ?: "en"
+        isTransparentBg = prefs.getBoolean(PREF_BG_TRANSPARENT_KEY, true)
 
         rootLayout = findViewById(R.id.root_layout)
         doodleView = findViewById(R.id.doodle_view)
+        doodleView.isPressureEnabled = prefs.getBoolean(PREF_SPEN_PRESSURE_KEY, true)
+
+        btnDone = findViewById(R.id.btn_done)
         btnRatio = findViewById(R.id.btn_ratio)
-        btnBgToggle = findViewById(R.id.btn_bg_toggle)
         btnZoomReset = findViewById(R.id.btn_zoom_reset)
         btnMore = findViewById(R.id.btn_more)
         btnUndo = findViewById(R.id.btn_undo)
         btnRedo = findViewById(R.id.btn_redo)
         btnEraser = findViewById(R.id.btn_eraser)
         btnClear = findViewById(R.id.btn_clear)
-        btnDone = findViewById(R.id.btn_done)
         val sliderBrush = findViewById<Slider>(R.id.slider_brush)
         val colorContainer = findViewById<LinearLayout>(R.id.color_container)
         val floatingToolbar = findViewById<MaterialCardView>(R.id.floating_toolbar)
@@ -101,9 +114,8 @@ class MainActivity : AppCompatActivity() {
         setupColorSwatches(colorContainer)
         applyBackgroundState()
 
-        btnBgToggle.setOnClickListener {
-            isTransparentBg = !isTransparentBg
-            applyBackgroundState()
+        btnDone.setOnClickListener {
+            saveAndPinWidget()
         }
 
         doodleView.onZoomChanged = { zoomPercent ->
@@ -160,12 +172,7 @@ class MainActivity : AppCompatActivity() {
             doodleView.clear()
         }
 
-        btnDone.setOnClickListener {
-            saveAndPinWidget()
-        }
-
         setupDraggableToolbar(dragHandle, floatingToolbar)
-        updateUILanguage()
     }
 
     private fun setupCanvasRatio() {
@@ -186,13 +193,13 @@ class MainActivity : AppCompatActivity() {
                     detectedRatio in 1.15f..1.55f -> CanvasRatio.STANDARD
                     detectedRatio in 1.55f..1.85f -> CanvasRatio.WIDE
                     detectedRatio > 1.85f -> CanvasRatio.BANNER
+                    detectedRatio < 0.85f -> CanvasRatio.PORTRAIT_5_4
                     else -> CanvasRatio.SQUARE
                 }
             }
         }
 
         doodleView.setCanvasRatio(initialRatio)
-        updateRatioButtonLabel(initialRatio)
 
         btnRatio.setOnClickListener {
             showVisualRatioModal()
@@ -212,6 +219,7 @@ class MainActivity : AppCompatActivity() {
             Triple(view.findViewById<MaterialCardView>(R.id.card_ratio_standard), CanvasRatio.STANDARD, view.findViewById<TextView>(R.id.sub_ratio_standard)),
             Triple(view.findViewById<MaterialCardView>(R.id.card_ratio_wide), CanvasRatio.WIDE, view.findViewById<TextView>(R.id.sub_ratio_wide)),
             Triple(view.findViewById<MaterialCardView>(R.id.card_ratio_banner), CanvasRatio.BANNER, view.findViewById<TextView>(R.id.sub_ratio_banner)),
+            Triple(view.findViewById<MaterialCardView>(R.id.card_ratio_5_4), CanvasRatio.PORTRAIT_5_4, view.findViewById<TextView>(R.id.sub_ratio_5_4)),
             Triple(view.findViewById<MaterialCardView>(R.id.card_ratio_full), CanvasRatio.FULLSCREEN, view.findViewById<TextView>(R.id.sub_ratio_full))
         )
 
@@ -219,15 +227,17 @@ class MainActivity : AppCompatActivity() {
         if (currentLang == "th") {
             cards[0].third.text = "จัตุรัส (2x2)"
             cards[1].third.text = "คลาสสิก (4x3)"
-            cards[2].third.text = "แบนเนอร์ (4x2)"
+            cards[2].third.text = "แนวกว้าง (4x2)"
             cards[3].third.text = "แถบยาว (5x2)"
-            cards[4].third.text = "เต็มหน้าจอ"
+            cards[4].third.text = "แนวตั้ง (5:4)"
+            cards[5].third.text = "เต็มหน้าจอ"
         } else {
             cards[0].third.text = "Square (2x2)"
             cards[1].third.text = "Classic (4x3)"
             cards[2].third.text = "Wide (4x2)"
             cards[3].third.text = "Banner (5x2)"
-            cards[4].third.text = "Full Screen"
+            cards[4].third.text = "Portrait (5:4)"
+            cards[5].third.text = "Full Screen"
         }
 
         val highlightStroke = Color.parseColor("#00E5FF")
@@ -249,7 +259,6 @@ class MainActivity : AppCompatActivity() {
                     .edit()
                     .putString(PREF_RATIO_KEY, ratio.key)
                     .apply()
-                updateRatioButtonLabel(ratio)
                 bottomSheet.dismiss()
             }
         }
@@ -262,19 +271,79 @@ class MainActivity : AppCompatActivity() {
         val view = layoutInflater.inflate(R.layout.modal_about, null)
         bottomSheet.setContentView(view)
 
+        val titleSettings = view.findViewById<TextView>(R.id.section_settings_title)
+        val labelBg = view.findViewById<TextView>(R.id.label_bg_mode)
+        val subBg = view.findViewById<TextView>(R.id.sub_bg_mode)
+        val switchBg = view.findViewById<MaterialSwitch>(R.id.switch_bg_dark)
+
+        val labelSpen = view.findViewById<TextView>(R.id.label_spen_pressure)
+        val subSpen = view.findViewById<TextView>(R.id.sub_spen_pressure)
+        val switchSpen = view.findViewById<MaterialSwitch>(R.id.switch_spen_pressure)
+
+        val btnSaveImage = view.findViewById<MaterialButton>(R.id.btn_save_image)
+
+        val labelLang = view.findViewById<TextView>(R.id.label_language)
+        val toggleLang = view.findViewById<MaterialButtonToggleGroup>(R.id.toggle_language)
+        val creatorText = view.findViewById<TextView>(R.id.about_creator_text)
         val btnLinkX = view.findViewById<MaterialButton>(R.id.btn_link_x)
         val btnLinkGithub = view.findViewById<MaterialButton>(R.id.btn_link_github)
-        val toggleLang = view.findViewById<MaterialButtonToggleGroup>(R.id.toggle_language)
-        val labelLang = view.findViewById<TextView>(R.id.label_language)
-        val creatorText = view.findViewById<TextView>(R.id.about_creator_text)
 
-        creatorText.text = if (currentLang == "th") "พัฒนาโดย @iannnnn" else "Created by @iannnnn"
-        labelLang.text = if (currentLang == "th") "ภาษา (Language)" else "Language"
+        switchBg.isChecked = !isTransparentBg
+        switchSpen.isChecked = doodleView.isPressureEnabled
+
+        fun updateModalContent() {
+            val isTh = currentLang == "th"
+            titleSettings.text = if (isTh) "การตั้งค่าแคนวาสและปากกา" else "Canvas & Pen Settings"
+
+            labelBg.text = if (isTh) "พื้นหลังสีดำทึบ" else "Solid Dark Background"
+            subBg.text = if (switchBg.isChecked) {
+                if (isTh) "โหมดสีดำทึบ (ไม่โปร่งใส)" else "Solid dark canvas (Opaque)"
+            } else {
+                if (isTh) "โหมดโปร่งใส (แนะนำสำหรับ Widget บนจอหลัก)" else "Transparent canvas (Ideal for widget)"
+            }
+
+            labelSpen.text = if (isTh) "น้ำหนักแรงกดปากกา (S-Pen)" else "S-Pen Pressure Sensitivity"
+            subSpen.text = if (switchSpen.isChecked) {
+                if (isTh) "เปิด: เส้นหนาตามแรงกด (Dynamic)" else "On: Dynamic stroke by pen pressure"
+            } else {
+                if (isTh) "ปิด: เส้นหนาสม่ำเสมอเท่ากัน (Mono-weight)" else "Off: Uniform stroke width (Mono-weight)"
+            }
+
+            btnSaveImage.text = if (isTh) "บันทึกรูปภาพลงแกลเลอรี" else "Save Image to Gallery"
+            labelLang.text = if (isTh) "ภาษา (Language)" else "Language / ภาษา"
+            creatorText.text = if (isTh) "พัฒนาโดย @iannnnn" else "Created by @iannnnn"
+        }
+
+        updateModalContent()
 
         if (currentLang == "th") {
             toggleLang.check(R.id.btn_lang_th)
         } else {
             toggleLang.check(R.id.btn_lang_en)
+        }
+
+        switchBg.setOnCheckedChangeListener { _, isChecked ->
+            isTransparentBg = !isChecked
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_BG_TRANSPARENT_KEY, isTransparentBg)
+                .apply()
+            applyBackgroundState()
+            updateModalContent()
+        }
+
+        switchSpen.setOnCheckedChangeListener { _, isChecked ->
+            doodleView.isPressureEnabled = isChecked
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_SPEN_PRESSURE_KEY, isChecked)
+                .apply()
+            updateModalContent()
+        }
+
+        btnSaveImage.setOnClickListener {
+            bottomSheet.dismiss()
+            showSaveImageDialog()
         }
 
         btnLinkX.setOnClickListener {
@@ -294,42 +363,102 @@ class MainActivity : AppCompatActivity() {
                     .edit()
                     .putString(PREF_LANG_KEY, currentLang)
                     .apply()
-
-                creatorText.text = if (currentLang == "th") "พัฒนาโดย @iannnnn" else "Created by @iannnnn"
-                labelLang.text = if (currentLang == "th") "ภาษา (Language)" else "Language"
-                updateUILanguage()
+                updateModalContent()
             }
         }
 
         bottomSheet.show()
     }
 
-    private fun updateUILanguage() {
-        applyBackgroundState()
-        updateRatioButtonLabel(doodleView.canvasRatio)
-    }
-
-    private fun updateRatioButtonLabel(ratio: CanvasRatio) {
-        val shortLabel = when (ratio) {
-            CanvasRatio.SQUARE -> "1:1"
-            CanvasRatio.STANDARD -> "4:3"
-            CanvasRatio.WIDE -> "16:9"
-            CanvasRatio.BANNER -> "2:1"
-            CanvasRatio.FULLSCREEN -> if (currentLang == "th") "เต็มจอ" else "Full"
-        }
-        val prefix = if (currentLang == "th") "สัดส่วน" else "Ratio"
-        btnRatio.text = "$prefix : $shortLabel"
-    }
-
     private fun applyBackgroundState() {
         if (isTransparentBg) {
             rootLayout.setBackgroundColor(Color.TRANSPARENT)
-            btnBgToggle.text = if (currentLang == "th") "พื้นหลัง : ใส" else "BG : Clear"
-            btnBgToggle.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#CC1E1E1E"))
         } else {
             rootLayout.setBackgroundColor(Color.parseColor("#181818"))
-            btnBgToggle.text = if (currentLang == "th") "พื้นหลัง : ดำ" else "BG : Dark"
-            btnBgToggle.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#383838"))
+        }
+    }
+
+    private fun showSaveImageDialog() {
+        val isTh = currentLang == "th"
+        val title = if (isTh) "เลือกพื้นหลังของรูปภาพ" else "Choose Image Background"
+        val options = if (isTh) {
+            arrayOf("พื้นหลังใส (Transparent)", "พื้นหลังสีขาว (White)", "พื้นหลังสีดำ (Black)")
+        } else {
+            arrayOf("Transparent (PNG)", "Solid White", "Solid Black")
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setItems(options) { _, which ->
+                val choice = when (which) {
+                    0 -> SaveBgOption.TRANSPARENT
+                    1 -> SaveBgOption.WHITE
+                    else -> SaveBgOption.BLACK
+                }
+                saveImageToGallery(choice)
+            }
+            .setNegativeButton(if (isTh) "ยกเลิก" else "Cancel", null)
+            .show()
+    }
+
+    private fun saveImageToGallery(choice: SaveBgOption) {
+        val bmp = doodleView.getDoodleBitmap() ?: return
+        val isTh = currentLang == "th"
+
+        val width = bmp.width
+        val height = bmp.height
+        val finalBmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(finalBmp)
+
+        when (choice) {
+            SaveBgOption.TRANSPARENT -> canvas.drawColor(Color.TRANSPARENT)
+            SaveBgOption.WHITE -> canvas.drawColor(Color.WHITE)
+            SaveBgOption.BLACK -> canvas.drawColor(Color.parseColor("#181818"))
+        }
+        canvas.drawBitmap(bmp, 0f, 0f, null)
+
+        val filename = "anndoodle_${System.currentTimeMillis()}.png"
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            var success = false
+            try {
+                val resolver = contentResolver
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/anndoodle")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                }
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        finalBmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        contentValues.clear()
+                        contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        resolver.update(uri, contentValues, null, null)
+                    }
+                    success = true
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                success = false
+            } finally {
+                finalBmp.recycle()
+            }
+
+            withContext(Dispatchers.Main) {
+                if (success) {
+                    val msg = if (isTh) "บันทึกรูปลงใน Pictures/anndoodle แล้ว!" else "Saved to Pictures/anndoodle!"
+                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                } else {
+                    val msg = if (isTh) "ไม่สามารถบันทึกรูปได้" else "Failed to save image"
+                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 

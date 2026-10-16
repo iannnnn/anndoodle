@@ -13,83 +13,123 @@
         android:layout_width="36dp"
         android:layout_height="4dp"
         android:layout_gravity="center_horizontal"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="18dp"
         android:background="@drawable/ic_drag_handle"
         android:backgroundTint="#44FFFFFF" />
 
+    <!-- Section 1: Canvas & Pen Settings -->
+    <TextView
+        android:id="@+id/section_settings_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="Canvas &amp; Pen Settings"
+        android:textColor="#E0E0E0"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- Background Switch Row -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center"
-        android:orientation="vertical">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingVertical="6dp">
 
-        <TextView
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/label_bg_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Dark Background"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/sub_bg_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Off: Transparent widget · On: Solid dark"
+                android:textColor="#9E9E9E"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_bg_dark"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="anndoodle"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="v2.1 · S-Pen Transparent Widget"
-            android:textColor="#9E9E9E"
-            android:textSize="12sp" />
-
-        <TextView
-            android:id="@+id/about_creator_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Created by @iannnnn"
-            android:textColor="#00E5FF"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:layout_marginStart="12dp" />
     </LinearLayout>
 
+    <!-- S-Pen Pressure Switch Row -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:gravity="center"
-        android:orientation="horizontal">
+        android:layout_marginTop="6dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingVertical="6dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_link_x"
+        <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="44dp"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:text="X / Twitter"
-            android:textSize="13sp"
-            android:textColor="#FFFFFF"
-            app:backgroundTint="#26FFFFFF"
-            app:strokeColor="#33FFFFFF"
-            app:strokeWidth="1dp"
-            app:cornerRadius="12dp" />
+            android:orientation="vertical">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_link_github"
-            android:layout_width="0dp"
-            android:layout_height="44dp"
-            android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:text="GitHub"
-            android:textSize="13sp"
-            android:textColor="#FFFFFF"
-            app:backgroundTint="#26FFFFFF"
-            app:strokeColor="#33FFFFFF"
-            app:strokeWidth="1dp"
-            app:cornerRadius="12dp" />
+            <TextView
+                android:id="@+id/label_spen_pressure"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="S-Pen Pressure Sensitivity"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/sub_spen_pressure"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Dynamic stroke width based on pen pressure"
+                android:textColor="#9E9E9E"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_spen_pressure"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp" />
     </LinearLayout>
+
+    <!-- Save Image Button -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_save_image"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginTop="12dp"
+        android:text="Save Image to Gallery"
+        android:textSize="14sp"
+        android:textColor="#FFFFFF"
+        app:icon="@drawable/ic_download"
+        app:iconGravity="textStart"
+        app:iconTint="#00E5FF"
+        app:backgroundTint="#26FFFFFF"
+        app:strokeColor="#33FFFFFF"
+        app:strokeWidth="1dp"
+        app:cornerRadius="12dp" />
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:layout_marginVertical="20dp"
+        android:layout_marginVertical="16dp"
         android:background="#1FFFFFFF" />
 
     <!-- Language Switcher Section -->
@@ -131,5 +171,81 @@
             android:textColor="#FFFFFF"
             app:strokeColor="#33FFFFFF" />
     </com.google.android.material.button.MaterialButtonToggleGroup>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginVertical="16dp"
+        android:background="#1FFFFFFF" />
+
+    <!-- App Info & Links -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="anndoodle"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="v2.1 · S-Pen Transparent Widget"
+            android:textColor="#9E9E9E"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/about_creator_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Created by @iannnnn"
+            android:textColor="#00E5FF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_link_x"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:text="X / Twitter"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            app:backgroundTint="#26FFFFFF"
+            app:strokeColor="#33FFFFFF"
+            app:strokeWidth="1dp"
+            app:cornerRadius="12dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_link_github"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="GitHub"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            app:backgroundTint="#26FFFFFF"
+            app:strokeColor="#33FFFFFF"
+            app:strokeWidth="1dp"
+            app:cornerRadius="12dp" />
+    </LinearLayout>
 
 </LinearLayout>
