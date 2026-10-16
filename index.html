@@ -619,7 +619,7 @@
             วิดเจ็ตวาดเขียนลายเส้นพื้นหลังใส 100% สำหรับ Android ออกแบบเพื่อ S-Pen โดยเฉพาะ แตะ 2 นิ้ว Undo / 3 นิ้ว Redo พร้อมแถบสีเพรียวบาง 64 เฉดสี และหน้าต่างเลือกสัดส่วน Widget แบบกราฟิก
           </p>
           <div class="btn-group">
-            <a href="https://github.com/iannnnn/anndoodle/releases" target="_blank" rel="noopener noreferrer" id="download-btn" class="btn btn-primary">
+            <a href="https://github.com/iannnnn/anndoodle/releases/latest/download/anndoodle.apk" target="_blank" rel="noopener noreferrer" id="download-btn" class="btn btn-primary">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
               ดาวน์โหลด APK ล่าสุด
             </a>
@@ -796,5 +796,27 @@
     </footer>
   </div>
 
+  <script>
+    // ตรวจสอบและดึงไฟล์ APK ล่าสุดจาก GitHub Releases API อัตโนมัติ
+    (async function() {
+      try {
+        const res = await fetch('https://api.github.com/repos/iannnnn/anndoodle/releases/latest');
+        if (res.ok) {
+          const data = await res.json();
+          const apkAsset = data.assets && data.assets.find(a => a.name.endsWith('.apk'));
+          const downloadBtn = document.getElementById('download-btn');
+          if (apkAsset && downloadBtn) {
+            downloadBtn.href = apkAsset.browser_download_url;
+          }
+          if (data.tag_name) {
+            const badge = document.querySelector('.brand-badge');
+            if (badge) badge.textContent = data.tag_name;
+          }
+        }
+      } catch (e) {
+        // Fallback uses direct latest download URL
+      }
+    })();
+  </script>
 </body>
 </html>
