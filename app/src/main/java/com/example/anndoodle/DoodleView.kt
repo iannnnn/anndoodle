@@ -8,7 +8,9 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 enum class CanvasRatio(val key: String, val title: String, val ratioW: Float, val ratioH: Float) {
     SQUARE("1_1", "1:1 (จัตุรัส)", 1f, 1f),
@@ -16,18 +18,8 @@ enum class CanvasRatio(val key: String, val title: String, val ratioW: Float, va
     WIDE("16_9", "16:9 (แถบกว้าง)", 16f, 9f),
     BANNER("2_1", "2:1 (แถบยาว)", 2f, 1f),
     PORTRAIT_5_4("4_5", "5:4 (แนวตั้ง)", 4f, 5f),
-    FULLSCREEN("full", "เต็มจอ", 0f, 0f);
-
-    fun getTargetDimensions(viewW: Int, viewH: Int): Pair<Int, Int> {
-        return when (this) {
-            SQUARE -> Pair(1440, 1440)
-            STANDARD -> Pair(1600, 1200)
-            WIDE -> Pair(1920, 1080)
-            BANNER -> Pair(1600, 800)
-            PORTRAIT_5_4 -> Pair(1280, 1600)
-            FULLSCREEN -> Pair(viewW.coerceAtLeast(720), viewH.coerceAtLeast(720))
-        }
-    }
+    FULLSCREEN("full", "เต็มจอ", 0f, 0f),
+    CUSTOM("custom", "กำหนดเอง (Custom)", 0f, 0f);
 
     companion object {
         fun fromKey(key: String?): CanvasRatio {
@@ -38,8 +30,24 @@ enum class CanvasRatio(val key: String, val title: String, val ratioW: Float, va
 
 class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
 
+    private enum class ResizeCorner {
+        NONE, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
+    }
+
+    private data class HistoryStep(
+        val bitmap: Bitmap,
+        val rect: RectF,
+        val ratio: CanvasRatio
+    )
+
     var canvasRatio: CanvasRatio = CanvasRatio.SQUARE
         private set
+
+    var isTransparentBg: Boolean = true
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     private var bitmap: Bitmap? = null
     private var bitmapCanvas: Canvas? = null
@@ -61,6 +69,11 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
 
     private val bitmapPaint = Paint(Paint.DITHER_FLAG or Paint.FILTER_BITMAP_FLAG)
 
+    private val darkCanvasBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#181818")
+        style = Paint.Style.FILL
+    }
+
     private val frameBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#6600E5FF")
         style = Paint.Style.STROKE
@@ -74,13 +87,36 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
     private val frameCornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#CC00E5FF")
         style = Paint.Style.STROKE
-        strokeWidth = 3f * resources.displayMetrics.density
+        strokeWidth = 3.5f * resources.displayMetrics.density
         strokeCap = Paint.Cap.ROUND
     }
 
-    private val dimPaint = Paint().apply {
-        color = Color.argb(90, 0, 0, 0)
+    private val activeCornerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#00E676")
+        style = Paint.Style.STROKE
+        strokeWidth = 5f * resources.displayMetrics.density
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    private val cornerKnobPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#3300E5FF")
         style = Paint.Style.FILL
+    }
+
+    private val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#D9181A20")
+        style = Paint.Style.FILL
+    }
+
+    private val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#00E5FF")
+        textSize = android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP,
+            12f,
+            resources.displayMetrics
+        )
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
 
     var penColor: Int = Color.WHITE
@@ -97,16 +133,31 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
     var onUndoTriggered: (() -> Unit)? = null
     var onRedoTriggered: (() -> Unit)? = null
     var onUndoRedoStateChanged: ((canUndo: Boolean, canRedo: Boolean) -> Unit)? = null
+    var onCanvasRectChanged: ((rect: RectF, ratio: CanvasRatio) -> Unit)? = null
+    var onViewTransformChanged: ((scale: Float, panX: Float, panY: Float) -> Unit)? = null
 
     val canvasRect = RectF()
+    private val pendingCustomRect = RectF()
+    private var hasPendingCustomRect = false
+    private var pendingWidgetAspectRatio: Float? = null
+
     private val clipPath = Path()
     private val transformedCanvasRect = RectF()
 
     private val baseMatrix = Matrix()
     private val viewMatrix = Matrix()
+    private val viewInverseMatrix = Matrix()
     private val totalMatrix = Matrix()
     private val inverseMatrix = Matrix()
     private var currentScale = 1f
+
+    // Corner resize state
+    private var activeResizeCorner = ResizeCorner.NONE
+    private var isResizingCorner = false
+    private val resizeStartCanvasRect = RectF()
+    private val resizeStartBaseMatrix = Matrix()
+    private var cornerDragOffsetX = 0f
+    private var cornerDragOffsetY = 0f
 
     private val currentPath = Path()
     private var lastDrawX = 0f
@@ -119,10 +170,10 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
 
     // Undo / Redo history & pooling
     private val MAX_HISTORY = 16
-    private val undoStack = ArrayDeque<Bitmap>()
-    private val redoStack = ArrayDeque<Bitmap>()
+    private val undoStack = ArrayDeque<HistoryStep>()
+    private val redoStack = ArrayDeque<HistoryStep>()
     private val bitmapPool = ArrayDeque<Bitmap>()
-    private var pendingBeforeStrokeBitmap: Bitmap? = null
+    private var pendingBeforeStrokeStep: HistoryStep? = null
 
     // Multi-touch & tap gesture tracking
     private var gestureStartTime = 0L
@@ -130,64 +181,232 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
     private var hasMovedExceededSlop = false
     private val startPointerPositions = HashMap<Int, PointF>()
     private val TAP_TIMEOUT_MS = 350L
-    private val TAP_MAX_DISTANCE_DP = 25f
+    private val TAP_MAX_DISTANCE_DP = 22f
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             val scaleFactor = detector.scaleFactor
-            val newScale = currentScale * scaleFactor
-            if (newScale in 0.5f..5.0f) {
+            val newScale = (currentScale * scaleFactor).coerceIn(0.4f, 5.0f)
+            val actualFactor = newScale / currentScale
+            if (abs(actualFactor - 1f) > 0.0001f) {
                 currentScale = newScale
-                viewMatrix.postScale(scaleFactor, scaleFactor, detector.focusX, detector.focusY)
+                viewMatrix.postScale(actualFactor, actualFactor, detector.focusX, detector.focusY)
                 updateMatrices()
-                onZoomChanged?.invoke((currentScale * 100).toInt())
+                onZoomChanged?.invoke((currentScale * 100).roundToInt())
+                notifyViewTransform()
                 invalidate()
             }
             return true
         }
     })
 
+    private fun computeTargetBitmapSize(rectW: Float, rectH: Float): Pair<Int, Int> {
+        val safeW = rectW.coerceAtLeast(100f)
+        val safeH = rectH.coerceAtLeast(100f)
+        var w = safeW * 1.6f
+        var h = safeH * 1.6f
+        val maxSide = maxOf(w, h)
+        if (maxSide > 2200f) {
+            val scale = 2200f / maxSide
+            w *= scale
+            h *= scale
+        } else if (maxSide < 600f) {
+            val scale = 600f / maxSide
+            w *= scale
+            h *= scale
+        }
+        return Pair(w.roundToInt().coerceAtLeast(100), h.roundToInt().coerceAtLeast(100))
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w > 0 && h > 0) {
-            if (bitmap == null) {
-                loadExistingOrCreateNew(w, h)
-            } else if (canvasRatio == CanvasRatio.FULLSCREEN && (oldw != w || oldh != h)) {
-                adaptBitmapToDimensions(w, h)
-            }
             updateCanvasGeometry(w, h)
+            if (bitmap == null) {
+                loadExistingOrCreateNew()
+            } else if (oldw != w || oldh != h) {
+                val (targetW, targetH) = computeTargetBitmapSize(canvasRect.width(), canvasRect.height())
+                adaptBitmapToDimensions(targetW, targetH, preserveCenterFit = true)
+            }
+            updateMatrices()
             invalidate()
         }
     }
 
-    fun setCanvasRatio(ratio: CanvasRatio) {
-        if (canvasRatio == ratio) return
+    /**
+     * Aligns the canvas frame to the exact on-screen widget rectangle from Launcher sourceBounds,
+     * clamped safely within DoodleView while strictly preserving the widget's aspect ratio.
+     */
+    fun applyWidgetSourceBounds(boundsInView: RectF) {
+        if (boundsInView.width() <= 20f || boundsInView.height() <= 20f) return
+        canvasRatio = CanvasRatio.CUSTOM
+        if (width > 0 && height > 0) {
+            val clamped = clampCustomRectPreservingRatio(boundsInView, width.toFloat(), height.toFloat())
+            canvasRect.set(clamped)
+            if (bitmap == null) {
+                loadExistingOrCreateNew()
+            } else {
+                val (targetW, targetH) = computeTargetBitmapSize(canvasRect.width(), canvasRect.height())
+                adaptBitmapToDimensions(targetW, targetH, preserveCenterFit = true)
+            }
+            resetZoom()
+            onCanvasRectChanged?.invoke(RectF(canvasRect), canvasRatio)
+            invalidate()
+        } else {
+            pendingCustomRect.set(boundsInView)
+            hasPendingCustomRect = true
+        }
+    }
 
-        captureCurrentToUndo()
+    /**
+     * Sets a custom canvas rectangle (e.g. restored from SharedPreferences).
+     */
+    fun setCustomCanvasRect(rect: RectF, ratio: CanvasRatio = CanvasRatio.CUSTOM) {
+        if (rect.width() <= 20f || rect.height() <= 20f) return
         canvasRatio = ratio
+        if (width > 0 && height > 0) {
+            val clamped = clampRectToView(rect, width.toFloat(), height.toFloat())
+            canvasRect.set(clamped)
+            if (bitmap == null) {
+                loadExistingOrCreateNew()
+            } else {
+                val (targetW, targetH) = computeTargetBitmapSize(canvasRect.width(), canvasRect.height())
+                adaptBitmapToDimensions(targetW, targetH, preserveCenterFit = true)
+            }
+            updateMatrices()
+            invalidate()
+        } else {
+            pendingCustomRect.set(rect)
+            hasPendingCustomRect = true
+        }
+    }
+
+    /**
+     * Aligns the canvas frame to a specific widget aspect ratio (width / height) when sourceBounds is unavailable.
+     */
+    fun setWidgetAspectRatio(aspectRatio: Float) {
+        if (aspectRatio <= 0.1f || aspectRatio > 10f) return
+        canvasRatio = CanvasRatio.CUSTOM
+        pendingWidgetAspectRatio = aspectRatio
+        hasPendingCustomRect = false
+        if (width > 0 && height > 0) {
+            updateCanvasGeometry(width, height)
+            if (bitmap == null) {
+                loadExistingOrCreateNew()
+            } else {
+                val (targetW, targetH) = computeTargetBitmapSize(canvasRect.width(), canvasRect.height())
+                adaptBitmapToDimensions(targetW, targetH, preserveCenterFit = true)
+            }
+            resetZoom()
+            onCanvasRectChanged?.invoke(RectF(canvasRect), canvasRatio)
+            invalidate()
+        }
+    }
+
+    fun setCanvasRatio(ratio: CanvasRatio, recordUndo: Boolean = true) {
+        if (canvasRatio == ratio && ratio != CanvasRatio.CUSTOM && !hasPendingCustomRect && pendingWidgetAspectRatio == null) {
+            return
+        }
+
+        if (recordUndo && bitmap != null && width > 0 && height > 0) {
+            captureCurrentToUndo()
+        }
+
+        canvasRatio = ratio
+        hasPendingCustomRect = false
+        pendingWidgetAspectRatio = null
 
         if (width > 0 && height > 0) {
-            val (targetW, targetH) = ratio.getTargetDimensions(width, height)
-            adaptBitmapToDimensions(targetW, targetH)
             updateCanvasGeometry(width, height)
+            val (targetW, targetH) = computeTargetBitmapSize(canvasRect.width(), canvasRect.height())
+            adaptBitmapToDimensions(targetW, targetH, preserveCenterFit = true)
             resetZoom()
+            onCanvasRectChanged?.invoke(RectF(canvasRect), canvasRatio)
             invalidate()
             notifyUndoRedoState()
         }
     }
 
+    fun restoreViewTransform(scale: Float, panX: Float, panY: Float) {
+        currentScale = scale.coerceIn(0.4f, 5.0f)
+        viewMatrix.reset()
+        viewMatrix.postScale(currentScale, currentScale, width / 2f, height / 2f)
+        viewMatrix.postTranslate(panX, panY)
+        updateMatrices()
+        onZoomChanged?.invoke((currentScale * 100).roundToInt())
+        invalidate()
+    }
+
+    private fun notifyViewTransform() {
+        val values = FloatArray(9)
+        viewMatrix.getValues(values)
+        onViewTransformChanged?.invoke(currentScale, values[Matrix.MTRANS_X], values[Matrix.MTRANS_Y])
+    }
+
+    private fun clampCustomRectPreservingRatio(src: RectF, viewW: Float, viewH: Float): RectF {
+        val density = resources.displayMetrics.density
+        val minMargin = 10f * density
+        val topSafe = 70f * density
+        val maxAvailW = (viewW - minMargin * 2f).coerceAtLeast(120f)
+        val maxAvailH = (viewH - topSafe - minMargin).coerceAtLeast(120f)
+
+        var w = src.width()
+        var h = src.height()
+        val ratio = w / h
+
+        if (w > maxAvailW) {
+            w = maxAvailW
+            h = w / ratio
+        }
+        if (h > maxAvailH) {
+            h = maxAvailH
+            w = h * ratio
+        }
+
+        var left = src.left.coerceIn(minMargin, (viewW - minMargin - w).coerceAtLeast(minMargin))
+        var top = src.top.coerceIn(topSafe, (viewH - minMargin - h).coerceAtLeast(topSafe))
+        return RectF(left, top, left + w, top + h)
+    }
+
+    private fun clampRectToView(src: RectF, viewW: Float, viewH: Float): RectF {
+        val density = resources.displayMetrics.density
+        val minMargin = 8f * density
+        val minSize = 90f * density
+        val left = src.left.coerceIn(minMargin, (viewW - minSize - minMargin).coerceAtLeast(minMargin))
+        val top = src.top.coerceIn(minMargin, (viewH - minSize - minMargin).coerceAtLeast(minMargin))
+        val right = src.right.coerceIn(left + minSize, (viewW - minMargin).coerceAtLeast(left + minSize))
+        val bottom = src.bottom.coerceIn(top + minSize, (viewH - minMargin).coerceAtLeast(top + minSize))
+        return RectF(left, top, right, bottom)
+    }
+
     private fun updateCanvasGeometry(w: Int, h: Int) {
         val density = resources.displayMetrics.density
-        if (canvasRatio == CanvasRatio.FULLSCREEN) {
-            canvasRect.set(0f, 0f, w.toFloat(), h.toFloat())
-        } else {
-            val topPadding = 75f * density
-            val bottomPadding = 120f * density
-            val sidePadding = 16f * density
+        if (hasPendingCustomRect) {
+            val clamped = clampCustomRectPreservingRatio(pendingCustomRect, w.toFloat(), h.toFloat())
+            canvasRect.set(clamped)
+            hasPendingCustomRect = false
+            updateMatrices()
+            return
+        }
 
+        if (canvasRatio == CanvasRatio.CUSTOM && canvasRect.width() > 20f && canvasRect.height() > 20f && pendingWidgetAspectRatio == null) {
+            val clamped = clampRectToView(canvasRect, w.toFloat(), h.toFloat())
+            canvasRect.set(clamped)
+            updateMatrices()
+            return
+        }
+
+        val topPadding = 75f * density
+        val bottomPadding = 120f * density
+        val sidePadding = 16f * density
+
+        if (canvasRatio == CanvasRatio.FULLSCREEN) {
+            val inset = 10f * density
+            canvasRect.set(inset, topPadding, w.toFloat() - inset, (h.toFloat() - inset).coerceAtLeast(topPadding + 200f))
+        } else {
             val availW = (w - sidePadding * 2f).coerceAtLeast(100f)
             val availH = (h - topPadding - bottomPadding).coerceAtLeast(100f)
-            val ratio = canvasRatio.ratioW / canvasRatio.ratioH
+            val ratio = pendingWidgetAspectRatio ?: (canvasRatio.ratioW / canvasRatio.ratioH)
 
             val targetW: Float
             val targetH: Float
@@ -215,13 +434,15 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
         baseMatrix.postScale(scaleX, scaleY)
         baseMatrix.postTranslate(canvasRect.left, canvasRect.top)
 
+        viewMatrix.invert(viewInverseMatrix)
+
         totalMatrix.set(baseMatrix)
         totalMatrix.postConcat(viewMatrix)
         totalMatrix.invert(inverseMatrix)
     }
 
-    private fun loadExistingOrCreateNew(viewW: Int, viewH: Int) {
-        val (targetW, targetH) = canvasRatio.getTargetDimensions(viewW, viewH)
+    private fun loadExistingOrCreateNew() {
+        val (targetW, targetH) = computeTargetBitmapSize(canvasRect.width(), canvasRect.height())
         val file = File(context.filesDir, "doodle.png")
 
         if (file.exists()) {
@@ -245,38 +466,74 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
             bitmap = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
         }
         bitmapCanvas = Canvas(bitmap!!)
+        updateMatrices()
         clearUndoHistory()
     }
 
-    private fun adaptBitmapToDimensions(targetW: Int, targetH: Int) {
+    private fun adaptBitmapToDimensions(targetW: Int, targetH: Int, preserveCenterFit: Boolean = true) {
         val oldBmp = bitmap ?: return
-        if (oldBmp.width == targetW && oldBmp.height == targetH) return
+        if (oldBmp.width == targetW && oldBmp.height == targetH) {
+            updateMatrices()
+            return
+        }
 
         val newBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
         val c = Canvas(newBmp)
-        val scale = minOf(targetW.toFloat() / oldBmp.width, targetH.toFloat() / oldBmp.height)
-        val sw = oldBmp.width * scale
-        val sh = oldBmp.height * scale
-        val dx = (targetW - sw) / 2f
-        val dy = (targetH - sh) / 2f
-        val destRect = RectF(dx, dy, dx + sw, dy + sh)
-        c.drawBitmap(oldBmp, null, destRect, bitmapPaint)
+        if (preserveCenterFit) {
+            val scale = minOf(targetW.toFloat() / oldBmp.width, targetH.toFloat() / oldBmp.height)
+            val sw = oldBmp.width * scale
+            val sh = oldBmp.height * scale
+            val dx = (targetW - sw) / 2f
+            val dy = (targetH - sh) / 2f
+            val destRect = RectF(dx, dy, dx + sw, dy + sh)
+            c.drawBitmap(oldBmp, null, destRect, bitmapPaint)
+        } else {
+            c.drawBitmap(oldBmp, 0f, 0f, bitmapPaint)
+        }
 
+        releaseBitmap(oldBmp)
         bitmap = newBmp
         bitmapCanvas = Canvas(bitmap!!)
-        clearUndoHistory()
+        updateMatrices()
+    }
+
+    /**
+     * Reallocates the bitmap after a corner-drag resize so that the existing drawing stays
+     * at the exact same screen coordinates and scale without stretching or shifting.
+     */
+    private fun commitCornerResizeBitmap(oldRect: RectF, newRect: RectF) {
+        val oldBmp = bitmap ?: return
+        val (newW, newH) = computeTargetBitmapSize(newRect.width(), newRect.height())
+        val newBmp = Bitmap.createBitmap(newW, newH, Bitmap.Config.ARGB_8888)
+        val c = Canvas(newBmp)
+
+        val scaleToNewX = newW.toFloat() / newRect.width().coerceAtLeast(1f)
+        val scaleToNewY = newH.toFloat() / newRect.height().coerceAtLeast(1f)
+        val dstLeft = (oldRect.left - newRect.left) * scaleToNewX
+        val dstTop = (oldRect.top - newRect.top) * scaleToNewY
+        val dstRight = dstLeft + oldRect.width() * scaleToNewX
+        val dstBottom = dstTop + oldRect.height() * scaleToNewY
+        val dstRect = RectF(dstLeft, dstTop, dstRight, dstBottom)
+
+        c.drawBitmap(oldBmp, null, dstRect, bitmapPaint)
+        releaseBitmap(oldBmp)
+        bitmap = newBmp
+        bitmapCanvas = Canvas(bitmap!!)
+        updateMatrices()
     }
 
     // --- Undo / Redo Pool & Stack ---
 
     private fun obtainPooledBitmap(w: Int, h: Int): Bitmap {
-        while (bitmapPool.isNotEmpty()) {
-            val pooled = bitmapPool.removeFirst()
-            if (!pooled.isRecycled && pooled.width == w && pooled.height == h) {
+        val iterator = bitmapPool.iterator()
+        while (iterator.hasNext()) {
+            val pooled = iterator.next()
+            if (pooled.isRecycled) {
+                iterator.remove()
+            } else if (pooled.width == w && pooled.height == h) {
+                iterator.remove()
                 pooled.eraseColor(Color.TRANSPARENT)
                 return pooled
-            } else {
-                pooled.recycle()
             }
         }
         return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -298,46 +555,73 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
         return copy
     }
 
+    private fun createCurrentStep(): HistoryStep? {
+        val current = bitmap ?: return null
+        return HistoryStep(
+            bitmap = copyToPooled(current),
+            rect = RectF(canvasRect),
+            ratio = canvasRatio
+        )
+    }
+
+    private fun releaseStep(step: HistoryStep) {
+        releaseBitmap(step.bitmap)
+    }
+
     private fun captureCurrentToUndo() {
-        val current = bitmap ?: return
-        val snapshot = copyToPooled(current)
+        val step = createCurrentStep() ?: return
         if (undoStack.size >= MAX_HISTORY) {
-            val discarded = undoStack.removeFirst()
-            releaseBitmap(discarded)
+            releaseStep(undoStack.removeFirst())
         }
-        undoStack.addLast(snapshot)
+        undoStack.addLast(step)
         clearRedoStack()
         notifyUndoRedoState()
     }
 
     private fun clearRedoStack() {
         while (redoStack.isNotEmpty()) {
-            releaseBitmap(redoStack.removeLast())
+            releaseStep(redoStack.removeLast())
         }
     }
 
     private fun clearUndoHistory() {
         while (undoStack.isNotEmpty()) {
-            releaseBitmap(undoStack.removeLast())
+            releaseStep(undoStack.removeLast())
         }
         clearRedoStack()
         notifyUndoRedoState()
     }
 
-    fun undo(): Boolean {
-        val current = bitmap ?: return false
-        if (undoStack.isEmpty()) return false
-
-        val currentSnapshot = copyToPooled(current)
-        if (redoStack.size >= MAX_HISTORY) {
-            releaseBitmap(redoStack.removeFirst())
+    private fun applyHistoryStep(step: HistoryStep) {
+        canvasRect.set(step.rect)
+        canvasRatio = step.ratio
+        val current = bitmap
+        if (current == null || current.width != step.bitmap.width || current.height != step.bitmap.height) {
+            current?.let { releaseBitmap(it) }
+            val newBmp = obtainPooledBitmap(step.bitmap.width, step.bitmap.height)
+            val c = Canvas(newBmp)
+            c.drawBitmap(step.bitmap, 0f, 0f, null)
+            bitmap = newBmp
+            bitmapCanvas = c
+        } else {
+            current.eraseColor(Color.TRANSPARENT)
+            bitmapCanvas?.drawBitmap(step.bitmap, 0f, 0f, null)
         }
-        redoStack.addLast(currentSnapshot)
+        updateMatrices()
+        onCanvasRectChanged?.invoke(RectF(canvasRect), canvasRatio)
+    }
 
-        val prevSnapshot = undoStack.removeLast()
-        current.eraseColor(Color.TRANSPARENT)
-        bitmapCanvas?.drawBitmap(prevSnapshot, 0f, 0f, null)
-        releaseBitmap(prevSnapshot)
+    fun undo(): Boolean {
+        if (undoStack.isEmpty()) return false
+        val currentStep = createCurrentStep() ?: return false
+        if (redoStack.size >= MAX_HISTORY) {
+            releaseStep(redoStack.removeFirst())
+        }
+        redoStack.addLast(currentStep)
+
+        val prevStep = undoStack.removeLast()
+        applyHistoryStep(prevStep)
+        releaseStep(prevStep)
 
         invalidate()
         notifyUndoRedoState()
@@ -345,19 +629,16 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
     }
 
     fun redo(): Boolean {
-        val current = bitmap ?: return false
         if (redoStack.isEmpty()) return false
-
-        val currentSnapshot = copyToPooled(current)
+        val currentStep = createCurrentStep() ?: return false
         if (undoStack.size >= MAX_HISTORY) {
-            releaseBitmap(undoStack.removeFirst())
+            releaseStep(undoStack.removeFirst())
         }
-        undoStack.addLast(currentSnapshot)
+        undoStack.addLast(currentStep)
 
-        val nextSnapshot = redoStack.removeLast()
-        current.eraseColor(Color.TRANSPARENT)
-        bitmapCanvas?.drawBitmap(nextSnapshot, 0f, 0f, null)
-        releaseBitmap(nextSnapshot)
+        val nextStep = redoStack.removeLast()
+        applyHistoryStep(nextStep)
+        releaseStep(nextStep)
 
         invalidate()
         notifyUndoRedoState()
@@ -376,58 +657,115 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
         val density = resources.displayMetrics.density
         val cornerRadius = 18f * density
 
-        if (canvasRatio != CanvasRatio.FULLSCREEN) {
-            // Draw dim mask outside the transformed canvas
-            canvas.save()
-            canvas.concat(viewMatrix)
+        // Draw dim mask outside the transformed canvas
+        canvas.save()
+        canvas.concat(viewMatrix)
 
-            clipPath.reset()
-            clipPath.addRoundRect(canvasRect, cornerRadius, cornerRadius, Path.Direction.CW)
+        clipPath.reset()
+        clipPath.addRoundRect(canvasRect, cornerRadius, cornerRadius, Path.Direction.CW)
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                canvas.clipOutPath(clipPath)
-            }
-            canvas.drawColor(Color.argb(85, 0, 0, 0))
-            canvas.restore()
-
-            // Draw bitmap and frame inside transformed canvas
-            canvas.save()
-            canvas.concat(viewMatrix)
-
-            val count = canvas.save()
-            canvas.clipPath(clipPath)
-            bitmap?.let {
-                canvas.drawBitmap(it, baseMatrix, bitmapPaint)
-            }
-            canvas.restoreToCount(count)
-
-            // Draw widget boundary outline
-            canvas.drawRoundRect(canvasRect, cornerRadius, cornerRadius, frameBorderPaint)
-
-            // Draw corner accent handles
-            val cLen = 14f * density
-            // Top-Left
-            canvas.drawLine(canvasRect.left, canvasRect.top + cornerRadius, canvasRect.left, canvasRect.top + cornerRadius + cLen, frameCornerPaint)
-            canvas.drawLine(canvasRect.left + cornerRadius, canvasRect.top, canvasRect.left + cornerRadius + cLen, canvasRect.top, frameCornerPaint)
-            // Top-Right
-            canvas.drawLine(canvasRect.right, canvasRect.top + cornerRadius, canvasRect.right, canvasRect.top + cornerRadius + cLen, frameCornerPaint)
-            canvas.drawLine(canvasRect.right - cornerRadius, canvasRect.top, canvasRect.right - cornerRadius - cLen, canvasRect.top, frameCornerPaint)
-            // Bottom-Left
-            canvas.drawLine(canvasRect.left, canvasRect.bottom - cornerRadius, canvasRect.left, canvasRect.bottom - cornerRadius - cLen, frameCornerPaint)
-            canvas.drawLine(canvasRect.left + cornerRadius, canvasRect.bottom, canvasRect.left + cornerRadius + cLen, canvasRect.bottom, frameCornerPaint)
-            // Bottom-Right
-            canvas.drawLine(canvasRect.right, canvasRect.bottom - cornerRadius, canvasRect.right, canvasRect.bottom - cornerRadius - cLen, frameCornerPaint)
-            canvas.drawLine(canvasRect.right - cornerRadius, canvasRect.bottom, canvasRect.right - cornerRadius - cLen, canvasRect.bottom, frameCornerPaint)
-
-            canvas.restore()
-        } else {
-            canvas.save()
-            canvas.concat(viewMatrix)
-            bitmap?.let {
-                canvas.drawBitmap(it, baseMatrix, bitmapPaint)
-            }
-            canvas.restore()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            canvas.clipOutPath(clipPath)
         }
+        canvas.drawColor(Color.argb(95, 0, 0, 0))
+        canvas.restore()
+
+        // Draw bitmap and frame inside transformed canvas
+        canvas.save()
+        canvas.concat(viewMatrix)
+
+        val count = canvas.save()
+        canvas.clipPath(clipPath)
+        if (!isTransparentBg) {
+            canvas.drawRoundRect(canvasRect, cornerRadius, cornerRadius, darkCanvasBgPaint)
+        }
+        bitmap?.let {
+            val drawMatrix = if (isResizingCorner) resizeStartBaseMatrix else baseMatrix
+            canvas.drawBitmap(it, drawMatrix, bitmapPaint)
+        }
+        canvas.restoreToCount(count)
+
+        // Draw widget boundary outline
+        canvas.drawRoundRect(canvasRect, cornerRadius, cornerRadius, frameBorderPaint)
+
+        // Draw corner resize handles
+        val cLen = 16f * density
+        val knobRadius = 12f * density
+
+        // Subtle touch target circles at corners
+        canvas.drawCircle(canvasRect.left + cornerRadius * 0.35f, canvasRect.top + cornerRadius * 0.35f, knobRadius, cornerKnobPaint)
+        canvas.drawCircle(canvasRect.right - cornerRadius * 0.35f, canvasRect.top + cornerRadius * 0.35f, knobRadius, cornerKnobPaint)
+        canvas.drawCircle(canvasRect.left + cornerRadius * 0.35f, canvasRect.bottom - cornerRadius * 0.35f, knobRadius, cornerKnobPaint)
+        canvas.drawCircle(canvasRect.right - cornerRadius * 0.35f, canvasRect.bottom - cornerRadius * 0.35f, knobRadius, cornerKnobPaint)
+
+        // Top-Left
+        val tlPaint = if (activeResizeCorner == ResizeCorner.TOP_LEFT) activeCornerPaint else frameCornerPaint
+        canvas.drawLine(canvasRect.left, canvasRect.top + cornerRadius, canvasRect.left, canvasRect.top + cornerRadius + cLen, tlPaint)
+        canvas.drawLine(canvasRect.left + cornerRadius, canvasRect.top, canvasRect.left + cornerRadius + cLen, canvasRect.top, tlPaint)
+        // Top-Right
+        val trPaint = if (activeResizeCorner == ResizeCorner.TOP_RIGHT) activeCornerPaint else frameCornerPaint
+        canvas.drawLine(canvasRect.right, canvasRect.top + cornerRadius, canvasRect.right, canvasRect.top + cornerRadius + cLen, trPaint)
+        canvas.drawLine(canvasRect.right - cornerRadius, canvasRect.top, canvasRect.right - cornerRadius - cLen, canvasRect.top, trPaint)
+        // Bottom-Left
+        val blPaint = if (activeResizeCorner == ResizeCorner.BOTTOM_LEFT) activeCornerPaint else frameCornerPaint
+        canvas.drawLine(canvasRect.left, canvasRect.bottom - cornerRadius, canvasRect.left, canvasRect.bottom - cornerRadius - cLen, blPaint)
+        canvas.drawLine(canvasRect.left + cornerRadius, canvasRect.bottom, canvasRect.left + cornerRadius + cLen, canvasRect.bottom, blPaint)
+        // Bottom-Right
+        val brPaint = if (activeResizeCorner == ResizeCorner.BOTTOM_RIGHT) activeCornerPaint else frameCornerPaint
+        canvas.drawLine(canvasRect.right, canvasRect.bottom - cornerRadius, canvasRect.right, canvasRect.bottom - cornerRadius - cLen, brPaint)
+        canvas.drawLine(canvasRect.right - cornerRadius, canvasRect.bottom, canvasRect.right - cornerRadius - cLen, canvasRect.bottom, brPaint)
+
+        if (isResizingCorner) {
+            val wDp = (canvasRect.width() / density).roundToInt()
+            val hDp = (canvasRect.height() / density).roundToInt()
+            val ratioVal = canvasRect.width() / canvasRect.height().coerceAtLeast(1f)
+            val label = "${wDp} × ${hDp} dp (${String.format("%.2f", ratioVal)}:1)"
+            val textWidth = badgeTextPaint.measureText(label)
+            val padH = 12f * density
+            val padV = 8f * density
+            val cx = canvasRect.centerX()
+            val cy = canvasRect.centerY()
+            val pillRect = RectF(
+                cx - textWidth / 2f - padH,
+                cy - padV * 1.8f,
+                cx + textWidth / 2f + padH,
+                cy + padV * 1.4f
+            )
+            canvas.drawRoundRect(pillRect, 12f * density, 12f * density, badgeBgPaint)
+            val textY = pillRect.centerY() - (badgeTextPaint.descent() + badgeTextPaint.ascent()) / 2f
+            canvas.drawText(label, cx, textY, badgeTextPaint)
+        }
+
+        canvas.restore()
+    }
+
+    private fun detectCornerHit(screenX: Float, screenY: Float): ResizeCorner {
+        viewMatrix.mapRect(transformedCanvasRect, canvasRect)
+        val hitRadius = 38f * resources.displayMetrics.density
+
+        val corners = listOf(
+            Triple(ResizeCorner.TOP_LEFT, transformedCanvasRect.left, transformedCanvasRect.top),
+            Triple(ResizeCorner.TOP_RIGHT, transformedCanvasRect.right, transformedCanvasRect.top),
+            Triple(ResizeCorner.BOTTOM_LEFT, transformedCanvasRect.left, transformedCanvasRect.bottom),
+            Triple(ResizeCorner.BOTTOM_RIGHT, transformedCanvasRect.right, transformedCanvasRect.bottom)
+        )
+
+        var bestCorner = ResizeCorner.NONE
+        var bestDist = hitRadius
+        for ((corner, cx, cy) in corners) {
+            val dist = hypot((screenX - cx).toDouble(), (screenY - cy).toDouble()).toFloat()
+            if (dist <= bestDist) {
+                bestDist = dist
+                bestCorner = corner
+            }
+        }
+        return bestCorner
+    }
+
+    private fun mapScreenToViewCanvasSpace(x: Float, y: Float): FloatArray {
+        val pts = floatArrayOf(x, y)
+        viewInverseMatrix.mapPoints(pts)
+        return pts
     }
 
     private fun mapPointToCanvas(x: Float, y: Float): FloatArray {
@@ -445,23 +783,33 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
         val usePressure = isPressureEnabled && isStylus
         val pressure = if (usePressure) event.pressure.coerceIn(0.2f, 1.0f) else 1.0f
 
+        val bmp = bitmap
+        val bitmapToCanvasScale = if (bmp != null && canvasRect.width() > 0f) {
+            bmp.width.toFloat() / canvasRect.width()
+        } else {
+            1.6f
+        }
+        val normalizedScale = (bitmapToCanvasScale / 1.6f).coerceIn(0.5f, 3.0f)
+
         return if (useEraser) {
-            clearPaint.apply { strokeWidth = brushSize * 2.5f }
+            clearPaint.apply { strokeWidth = brushSize * 2.5f * normalizedScale }
         } else {
             strokePaint.apply {
                 color = penColor
-                strokeWidth = if (usePressure) {
+                val baseWidth = if (usePressure) {
                     (brushSize * pressure * 1.3f).coerceAtLeast(2f)
                 } else {
                     brushSize
                 }
+                strokeWidth = baseWidth * normalizedScale
             }
         }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         scaleDetector.onTouchEvent(event)
-        val tapDistLimit = TAP_MAX_DISTANCE_DP * resources.displayMetrics.density
+        val density = resources.displayMetrics.density
+        val tapDistLimit = TAP_MAX_DISTANCE_DP * density
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -471,17 +819,48 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
                 startPointerPositions.clear()
                 startPointerPositions[event.getPointerId(0)] = PointF(event.x, event.y)
 
-                bitmap?.let {
-                    pendingBeforeStrokeBitmap?.let { old -> releaseBitmap(old) }
-                    pendingBeforeStrokeBitmap = copyToPooled(it)
-                }
+                pendingBeforeStrokeStep?.let { releaseStep(it) }
+                pendingBeforeStrokeStep = createCurrentStep()
 
-                val pts = mapPointToCanvas(event.x, event.y)
-                lastDrawX = pts[0]
-                lastDrawY = pts[1]
-                currentPath.reset()
-                currentPath.moveTo(lastDrawX, lastDrawY)
-                isDrawing = true
+                val hitCorner = detectCornerHit(event.x, event.y)
+                if (hitCorner != ResizeCorner.NONE) {
+                    activeResizeCorner = hitCorner
+                    isResizingCorner = true
+                    isDrawing = false
+                    resizeStartCanvasRect.set(canvasRect)
+                    resizeStartBaseMatrix.set(baseMatrix)
+
+                    val viewPt = mapScreenToViewCanvasSpace(event.x, event.y)
+                    when (hitCorner) {
+                        ResizeCorner.TOP_LEFT -> {
+                            cornerDragOffsetX = canvasRect.left - viewPt[0]
+                            cornerDragOffsetY = canvasRect.top - viewPt[1]
+                        }
+                        ResizeCorner.TOP_RIGHT -> {
+                            cornerDragOffsetX = canvasRect.right - viewPt[0]
+                            cornerDragOffsetY = canvasRect.top - viewPt[1]
+                        }
+                        ResizeCorner.BOTTOM_LEFT -> {
+                            cornerDragOffsetX = canvasRect.left - viewPt[0]
+                            cornerDragOffsetY = canvasRect.bottom - viewPt[1]
+                        }
+                        ResizeCorner.BOTTOM_RIGHT -> {
+                            cornerDragOffsetX = canvasRect.right - viewPt[0]
+                            cornerDragOffsetY = canvasRect.bottom - viewPt[1]
+                        }
+                        ResizeCorner.NONE -> {}
+                    }
+                    invalidate()
+                } else {
+                    activeResizeCorner = ResizeCorner.NONE
+                    isResizingCorner = false
+                    val pts = mapPointToCanvas(event.x, event.y)
+                    lastDrawX = pts[0]
+                    lastDrawY = pts[1]
+                    currentPath.reset()
+                    currentPath.moveTo(lastDrawX, lastDrawY)
+                    isDrawing = true
+                }
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -490,16 +869,24 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
                 val pId = event.getPointerId(pIdx)
                 startPointerPositions[pId] = PointF(event.getX(pIdx), event.getY(pIdx))
 
+                if (isResizingCorner) {
+                    canvasRect.set(resizeStartCanvasRect)
+                    isResizingCorner = false
+                    activeResizeCorner = ResizeCorner.NONE
+                    updateMatrices()
+                    invalidate()
+                }
+
                 // Cancel single finger drawing stroke and restore clean snapshot
-                if (isDrawing && pendingBeforeStrokeBitmap != null) {
+                if (isDrawing && pendingBeforeStrokeStep != null) {
                     bitmap?.eraseColor(Color.TRANSPARENT)
-                    bitmapCanvas?.drawBitmap(pendingBeforeStrokeBitmap!!, 0f, 0f, null)
+                    bitmapCanvas?.drawBitmap(pendingBeforeStrokeStep!!.bitmap, 0f, 0f, null)
                     currentPath.reset()
                     isDrawing = false
                     invalidate()
                 }
 
-                if (event.pointerCount > 1) {
+                if (event.pointerCount >= 2) {
                     val focusX = (event.getX(0) + event.getX(1)) / 2f
                     val focusY = (event.getY(0) + event.getY(1)) / 2f
                     lastPanX = focusX
@@ -524,18 +911,51 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
                     }
                 }
 
-                if (event.pointerCount > 1) {
-                    if (isPanning && !scaleDetector.isInProgress && hasMovedExceededSlop) {
-                        val focusX = (event.getX(0) + event.getX(1)) / 2f
-                        val focusY = (event.getY(0) + event.getY(1)) / 2f
-                        val dx = focusX - lastPanX
-                        val dy = focusY - lastPanY
+                if (event.pointerCount >= 2) {
+                    val focusX = (event.getX(0) + event.getX(1)) / 2f
+                    val focusY = (event.getY(0) + event.getY(1)) / 2f
+                    val dx = focusX - lastPanX
+                    val dy = focusY - lastPanY
+                    lastPanX = focusX
+                    lastPanY = focusY
+
+                    if (isPanning && hasMovedExceededSlop) {
                         viewMatrix.postTranslate(dx, dy)
                         updateMatrices()
+                        notifyViewTransform()
                         invalidate()
-                        lastPanX = focusX
-                        lastPanY = focusY
                     }
+                } else if (event.pointerCount == 1 && isResizingCorner) {
+                    val viewPt = mapScreenToViewCanvasSpace(event.x, event.y)
+                    val targetX = viewPt[0] + cornerDragOffsetX
+                    val targetY = viewPt[1] + cornerDragOffsetY
+                    val minSize = (95f * density) / currentScale.coerceAtLeast(0.5f)
+                    val margin = 6f * density
+                    val minBoundX = -width * 0.5f
+                    val maxBoundX = width * 1.5f
+                    val minBoundY = -height * 0.5f
+                    val maxBoundY = height * 1.5f
+
+                    when (activeResizeCorner) {
+                        ResizeCorner.TOP_LEFT -> {
+                            canvasRect.left = targetX.coerceIn(minBoundX + margin, canvasRect.right - minSize)
+                            canvasRect.top = targetY.coerceIn(minBoundY + margin, canvasRect.bottom - minSize)
+                        }
+                        ResizeCorner.TOP_RIGHT -> {
+                            canvasRect.right = targetX.coerceIn(canvasRect.left + minSize, maxBoundX - margin)
+                            canvasRect.top = targetY.coerceIn(minBoundY + margin, canvasRect.bottom - minSize)
+                        }
+                        ResizeCorner.BOTTOM_LEFT -> {
+                            canvasRect.left = targetX.coerceIn(minBoundX + margin, canvasRect.right - minSize)
+                            canvasRect.bottom = targetY.coerceIn(canvasRect.top + minSize, maxBoundY - margin)
+                        }
+                        ResizeCorner.BOTTOM_RIGHT -> {
+                            canvasRect.right = targetX.coerceIn(canvasRect.left + minSize, maxBoundX - margin)
+                            canvasRect.bottom = targetY.coerceIn(canvasRect.top + minSize, maxBoundY - margin)
+                        }
+                        ResizeCorner.NONE -> {}
+                    }
+                    invalidate()
                 } else if (event.pointerCount == 1 && !isPanning && !scaleDetector.isInProgress) {
                     val pts = mapPointToCanvas(event.x, event.y)
                     val canvasX = pts[0]
@@ -556,7 +976,24 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
-                if (event.pointerCount <= 2) {
+                val remaining = event.pointerCount - 1
+                if (remaining >= 2) {
+                    val upIdx = event.actionIndex
+                    var sumX = 0f
+                    var sumY = 0f
+                    var count = 0
+                    for (i in 0 until event.pointerCount) {
+                        if (i != upIdx && count < 2) {
+                            sumX += event.getX(i)
+                            sumY += event.getY(i)
+                            count++
+                        }
+                    }
+                    if (count == 2) {
+                        lastPanX = sumX / 2f
+                        lastPanY = sumY / 2f
+                    }
+                } else {
                     isPanning = false
                 }
             }
@@ -565,9 +1002,41 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
                 val duration = System.currentTimeMillis() - gestureStartTime
                 val isTap = !hasMovedExceededSlop && duration <= TAP_TIMEOUT_MS
 
+                if (isResizingCorner) {
+                    val changed = abs(canvasRect.left - resizeStartCanvasRect.left) > 1f ||
+                            abs(canvasRect.top - resizeStartCanvasRect.top) > 1f ||
+                            abs(canvasRect.right - resizeStartCanvasRect.right) > 1f ||
+                            abs(canvasRect.bottom - resizeStartCanvasRect.bottom) > 1f
+
+                    isResizingCorner = false
+                    activeResizeCorner = ResizeCorner.NONE
+
+                    if (changed && event.actionMasked != MotionEvent.ACTION_CANCEL) {
+                        canvasRatio = CanvasRatio.CUSTOM
+                        commitCornerResizeBitmap(resizeStartCanvasRect, canvasRect)
+                        pendingBeforeStrokeStep?.let {
+                            if (undoStack.size >= MAX_HISTORY) {
+                                releaseStep(undoStack.removeFirst())
+                            }
+                            undoStack.addLast(it)
+                            clearRedoStack()
+                            notifyUndoRedoState()
+                            pendingBeforeStrokeStep = null
+                        }
+                        onCanvasRectChanged?.invoke(RectF(canvasRect), canvasRatio)
+                    } else {
+                        canvasRect.set(resizeStartCanvasRect)
+                        updateMatrices()
+                        pendingBeforeStrokeStep?.let { releaseStep(it) }
+                        pendingBeforeStrokeStep = null
+                    }
+                    invalidate()
+                    return true
+                }
+
                 if (isTap && maxPointersInGesture == 2) {
-                    pendingBeforeStrokeBitmap?.let { releaseBitmap(it) }
-                    pendingBeforeStrokeBitmap = null
+                    pendingBeforeStrokeStep?.let { releaseStep(it) }
+                    pendingBeforeStrokeStep = null
                     isDrawing = false
                     currentPath.reset()
                     if (undo()) {
@@ -575,8 +1044,8 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
                     }
                     return true
                 } else if (isTap && maxPointersInGesture == 3) {
-                    pendingBeforeStrokeBitmap?.let { releaseBitmap(it) }
-                    pendingBeforeStrokeBitmap = null
+                    pendingBeforeStrokeStep?.let { releaseStep(it) }
+                    pendingBeforeStrokeStep = null
                     isDrawing = false
                     currentPath.reset()
                     if (redo()) {
@@ -592,8 +1061,8 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
                     val paint = getActivePaint(event)
 
                     if (!hasMovedExceededSlop) {
-                        // Single tap creates a point/dot
-                        bitmapCanvas?.drawPoint(canvasX, canvasY, paint)
+                        // Single tap creates a clean round dot
+                        bitmapCanvas?.drawLine(canvasX, canvasY, canvasX + 0.05f, canvasY, paint)
                     } else {
                         currentPath.lineTo(canvasX, canvasY)
                         bitmapCanvas?.drawPath(currentPath, paint)
@@ -602,18 +1071,18 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
                     isDrawing = false
                     invalidate()
 
-                    pendingBeforeStrokeBitmap?.let {
+                    pendingBeforeStrokeStep?.let {
                         if (undoStack.size >= MAX_HISTORY) {
-                            releaseBitmap(undoStack.removeFirst())
+                            releaseStep(undoStack.removeFirst())
                         }
                         undoStack.addLast(it)
                         clearRedoStack()
                         notifyUndoRedoState()
-                        pendingBeforeStrokeBitmap = null
+                        pendingBeforeStrokeStep = null
                     }
                 } else {
-                    pendingBeforeStrokeBitmap?.let { releaseBitmap(it) }
-                    pendingBeforeStrokeBitmap = null
+                    pendingBeforeStrokeStep?.let { releaseStep(it) }
+                    pendingBeforeStrokeStep = null
                     isDrawing = false
                     currentPath.reset()
                 }
@@ -629,6 +1098,7 @@ class DoodleView(context: Context, attrs: AttributeSet? = null) : View(context, 
         viewMatrix.reset()
         updateMatrices()
         onZoomChanged?.invoke(100)
+        notifyViewTransform()
         invalidate()
     }
 

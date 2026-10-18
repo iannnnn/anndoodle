@@ -6,9 +6,11 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
@@ -35,6 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
@@ -64,6 +67,13 @@ class MainActivity : AppCompatActivity() {
 
     private val PREFS_NAME = "anndoodle_prefs"
     private val PREF_RATIO_KEY = "canvas_ratio"
+    private val PREF_CUSTOM_LEFT = "custom_rect_left"
+    private val PREF_CUSTOM_TOP = "custom_rect_top"
+    private val PREF_CUSTOM_RIGHT = "custom_rect_right"
+    private val PREF_CUSTOM_BOTTOM = "custom_rect_bottom"
+    private val PREF_VIEW_SCALE = "view_scale"
+    private val PREF_VIEW_PAN_X = "view_pan_x"
+    private val PREF_VIEW_PAN_Y = "view_pan_y"
     private val PREF_LANG_KEY = "app_language"
     private val PREF_BG_TRANSPARENT_KEY = "canvas_bg_transparent"
     private val PREF_SPEN_PRESSURE_KEY = "spen_pressure"
@@ -72,6 +82,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var rootLayout: FrameLayout
     private lateinit var doodleView: DoodleView
+    private lateinit var floatingToolbar: MaterialCardView
     private lateinit var btnDone: MaterialButton
     private lateinit var btnRatio: MaterialButton
     private lateinit var btnZoomReset: MaterialButton
@@ -107,15 +118,37 @@ class MainActivity : AppCompatActivity() {
         btnClear = findViewById(R.id.btn_clear)
         val sliderBrush = findViewById<Slider>(R.id.slider_brush)
         val colorContainer = findViewById<LinearLayout>(R.id.color_container)
-        val floatingToolbar = findViewById<MaterialCardView>(R.id.floating_toolbar)
+        floatingToolbar = findViewById(R.id.floating_toolbar)
         val dragHandle = findViewById<View>(R.id.drag_handle_area)
 
-        setupCanvasRatio()
+        doodleView.onCanvasRectChanged = { rect, ratio ->
+            prefs.edit()
+                .putString(PREF_RATIO_KEY, ratio.key)
+                .putFloat(PREF_CUSTOM_LEFT, rect.left)
+                .putFloat(PREF_CUSTOM_TOP, rect.top)
+                .putFloat(PREF_CUSTOM_RIGHT, rect.right)
+                .putFloat(PREF_CUSTOM_BOTTOM, rect.bottom)
+                .apply()
+        }
+
+        doodleView.onViewTransformChanged = { scale, panX, panY ->
+            prefs.edit()
+                .putFloat(PREF_VIEW_SCALE, scale)
+                .putFloat(PREF_VIEW_PAN_X, panX)
+                .putFloat(PREF_VIEW_PAN_Y, panY)
+                .apply()
+        }
+
+        setupCanvasRatio(intent)
         setupColorSwatches(colorContainer)
         applyBackgroundState()
 
         btnDone.setOnClickListener {
             saveAndPinWidget()
+        }
+
+        btnRatio.setOnClickListener {
+            showVisualRatioModal()
         }
 
         doodleView.onZoomChanged = { zoomPercent ->
@@ -175,34 +208,152 @@ class MainActivity : AppCompatActivity() {
         setupDraggableToolbar(dragHandle, floatingToolbar)
     }
 
-    private fun setupCanvasRatio() {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        setupCanvasRatio(intent)
+    }
+
+    private fun getWidgetDimensionsDp(appWidgetManager: AppWidgetManager, appWidgetId: Int): Pair<Int, Int>? {
+        val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val wDp: Int
+        val hDp: Int
+        if (isLandscape) {
+            wDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH)
+                .takeIf { it > 0 } ?: options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
+            hDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
+                .takeIf { it > 0 } ?: options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
+        } else {
+            wDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
+            hDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
+                .takeIf { it > 0 } ?: options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
+        }
+        if (wDp > 0 && hDp > 0) return Pair(wDp, hDp)
+
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        var initialRatio = CanvasRatio.fromKey(prefs.getString(PREF_RATIO_KEY, CanvasRatio.SQUARE.key))
+        val savedW = prefs.getInt("widget_${appWidgetId}_w", 0)
+        val savedH = prefs.getInt("widget_${appWidgetId}_h", 0)
+        if (savedW > 0 && savedH > 0) return Pair(savedW, savedH)
+        return null
+    }
 
-        val appWidgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
-        if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
-            val appWidgetManager = AppWidgetManager.getInstance(this)
-            val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
-            val minW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
-            val minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
+    private fun setupCanvasRatio(launchIntent: Intent) {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val savedRatioKey = prefs.getString(PREF_RATIO_KEY, null)
+        val savedRatio = CanvasRatio.fromKey(savedRatioKey)
 
-            if (minW > 0 && minH > 0) {
-                val detectedRatio = minW.toFloat() / minH.toFloat()
-                initialRatio = when {
-                    detectedRatio in 0.85f..1.15f -> CanvasRatio.SQUARE
-                    detectedRatio in 1.15f..1.55f -> CanvasRatio.STANDARD
-                    detectedRatio in 1.55f..1.85f -> CanvasRatio.WIDE
-                    detectedRatio > 1.85f -> CanvasRatio.BANNER
-                    detectedRatio < 0.85f -> CanvasRatio.PORTRAIT_5_4
-                    else -> CanvasRatio.SQUARE
+        val savedLeft = prefs.getFloat(PREF_CUSTOM_LEFT, 0f)
+        val savedTop = prefs.getFloat(PREF_CUSTOM_TOP, 0f)
+        val savedRight = prefs.getFloat(PREF_CUSTOM_RIGHT, 0f)
+        val savedBottom = prefs.getFloat(PREF_CUSTOM_BOTTOM, 0f)
+        val hasSavedCustomRect = (savedRight - savedLeft) > 50f && (savedBottom - savedTop) > 50f
+
+        val appWidgetManager = AppWidgetManager.getInstance(this)
+        var appWidgetId = launchIntent.getIntExtra(
+            AppWidgetManager.EXTRA_APPWIDGET_ID,
+            AppWidgetManager.INVALID_APPWIDGET_ID
+        )
+        val sourceBounds = launchIntent.sourceBounds
+
+        // 1. If launched directly by clicking a widget on Home Screen and launcher provided exact sourceBounds
+        if (sourceBounds != null && sourceBounds.width() > 40 && sourceBounds.height() > 40) {
+            doodleView.post {
+                val loc = IntArray(2)
+                doodleView.getLocationOnScreen(loc)
+                val localRect = RectF(
+                    (sourceBounds.left - loc[0]).toFloat(),
+                    (sourceBounds.top - loc[1]).toFloat(),
+                    (sourceBounds.right - loc[0]).toFloat(),
+                    (sourceBounds.bottom - loc[1]).toFloat()
+                )
+                val widgetRatio = localRect.width() / localRect.height().coerceAtLeast(1f)
+                val savedCustomRatio = if (hasSavedCustomRect) {
+                    (savedRight - savedLeft) / (savedBottom - savedTop).coerceAtLeast(1f)
+                } else -1f
+
+                // If user already manually resized the canvas to a very similar ratio, keep their preferred rect;
+                // otherwise snap to the exact widget bounds on screen!
+                if (savedRatio == CanvasRatio.CUSTOM && hasSavedCustomRect && abs(savedCustomRatio - widgetRatio) < 0.08f) {
+                    doodleView.setCustomCanvasRect(RectF(savedLeft, savedTop, savedRight, savedBottom), CanvasRatio.CUSTOM)
+                } else {
+                    doodleView.applyWidgetSourceBounds(localRect)
                 }
+                avoidToolbarOverlapWithCanvas()
+            }
+            return
+        }
+
+        // 2. If launched from a widget (or if a widget exists on Home Screen) without sourceBounds
+        if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID && savedRatioKey == null) {
+            val existingIds = appWidgetManager.getAppWidgetIds(ComponentName(this, DoodleWidget::class.java))
+            if (existingIds.isNotEmpty()) {
+                appWidgetId = existingIds.first()
             }
         }
 
-        doodleView.setCanvasRatio(initialRatio)
+        if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            val dims = getWidgetDimensionsDp(appWidgetManager, appWidgetId)
+            if (dims != null) {
+                val (wDp, hDp) = dims
+                val widgetRatio = wDp.toFloat() / hDp.toFloat()
+                val savedCustomRatio = if (hasSavedCustomRect) {
+                    (savedRight - savedLeft) / (savedBottom - savedTop).coerceAtLeast(1f)
+                } else -1f
 
-        btnRatio.setOnClickListener {
-            showVisualRatioModal()
+                if (savedRatio == CanvasRatio.CUSTOM && hasSavedCustomRect && abs(savedCustomRatio - widgetRatio) < 0.08f) {
+                    doodleView.setCustomCanvasRect(RectF(savedLeft, savedTop, savedRight, savedBottom), CanvasRatio.CUSTOM)
+                } else {
+                    doodleView.setWidgetAspectRatio(widgetRatio)
+                }
+                return
+            }
+        }
+
+        // 3. Otherwise restore from SharedPreferences
+        if (savedRatio == CanvasRatio.CUSTOM && hasSavedCustomRect) {
+            doodleView.setCustomCanvasRect(RectF(savedLeft, savedTop, savedRight, savedBottom), CanvasRatio.CUSTOM)
+        } else {
+            doodleView.setCanvasRatio(savedRatio, recordUndo = false)
+        }
+
+        val savedScale = prefs.getFloat(PREF_VIEW_SCALE, 1f)
+        val savedPanX = prefs.getFloat(PREF_VIEW_PAN_X, 0f)
+        val savedPanY = prefs.getFloat(PREF_VIEW_PAN_Y, 0f)
+        if (abs(savedScale - 1f) > 0.01f || abs(savedPanX) > 1f || abs(savedPanY) > 1f) {
+            doodleView.post {
+                doodleView.restoreViewTransform(savedScale, savedPanX, savedPanY)
+            }
+        }
+    }
+
+    /**
+     * If the widget on the Home Screen is placed near the bottom of the screen where the floating
+     * toolbar defaults, automatically move the floating toolbar up below the top bar so it doesn't cover the canvas.
+     */
+    private fun avoidToolbarOverlapWithCanvas() {
+        floatingToolbar.post {
+            val cRect = doodleView.canvasRect
+            val tbTop = floatingToolbar.y
+            val tbBottom = tbTop + floatingToolbar.height
+            val overlapsVertically = cRect.bottom > tbTop - 12f && cRect.top < tbBottom + 12f
+            if (overlapsVertically) {
+                val density = resources.displayMetrics.density
+                val topSafeY = 74f * density
+                val parentH = (floatingToolbar.parent as? View)?.height ?: rootLayout.height
+                // Place toolbar above the canvas if there's more room at the top, else at the very bottom
+                val spaceAbove = cRect.top - topSafeY
+                val spaceBelow = parentH - cRect.bottom
+                val targetY = if (spaceAbove >= floatingToolbar.height || spaceAbove > spaceBelow) {
+                    topSafeY
+                } else {
+                    (parentH - floatingToolbar.height - 12f * density).coerceAtLeast(topSafeY)
+                }
+                floatingToolbar.animate()
+                    .y(targetY)
+                    .setDuration(180)
+                    .start()
+            }
         }
     }
 
@@ -212,7 +363,11 @@ class MainActivity : AppCompatActivity() {
         bottomSheet.setContentView(view)
 
         val title = view.findViewById<TextView>(R.id.modal_ratio_title)
-        title.text = if (currentLang == "th") "สัดส่วน Widget" else "Widget Aspect Ratio"
+        title.text = if (currentLang == "th") {
+            "สัดส่วน Widget (หรือลากมุมกรอบเพื่อปรับอิสระ)"
+        } else {
+            "Widget Aspect Ratio (or drag corners to resize)"
+        }
 
         val cards = listOf(
             Triple(view.findViewById<MaterialCardView>(R.id.card_ratio_square), CanvasRatio.SQUARE, view.findViewById<TextView>(R.id.sub_ratio_square)),
@@ -229,14 +384,14 @@ class MainActivity : AppCompatActivity() {
             cards[1].third.text = "คลาสสิก (4x3)"
             cards[2].third.text = "แนวกว้าง (4x2)"
             cards[3].third.text = "แถบยาว (5x2)"
-            cards[4].third.text = "แนวตั้ง (5:4)"
+            cards[4].third.text = "แนวตั้ง (4:5)"
             cards[5].third.text = "เต็มหน้าจอ"
         } else {
             cards[0].third.text = "Square (2x2)"
             cards[1].third.text = "Classic (4x3)"
             cards[2].third.text = "Wide (4x2)"
             cards[3].third.text = "Banner (5x2)"
-            cards[4].third.text = "Portrait (5:4)"
+            cards[4].third.text = "Portrait (4:5)"
             cards[5].third.text = "Full Screen"
         }
 
@@ -254,7 +409,7 @@ class MainActivity : AppCompatActivity() {
             card.setCardBackgroundColor(if (isActive) highlightBg else normalBg)
 
             card.setOnClickListener {
-                doodleView.setCanvasRatio(ratio)
+                doodleView.setCanvasRatio(ratio, recordUndo = true)
                 getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                     .edit()
                     .putString(PREF_RATIO_KEY, ratio.key)
@@ -330,6 +485,13 @@ class MainActivity : AppCompatActivity() {
                 .apply()
             applyBackgroundState()
             updateModalContent()
+
+            // Immediately refresh any active widgets so background mode is reflected on Home Screen
+            val appWidgetManager = AppWidgetManager.getInstance(this)
+            val existingIds = appWidgetManager.getAppWidgetIds(ComponentName(this, DoodleWidget::class.java))
+            for (id in existingIds) {
+                DoodleWidget.updateAppWidget(this, appWidgetManager, id)
+            }
         }
 
         switchSpen.setOnCheckedChangeListener { _, isChecked ->
@@ -371,11 +533,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyBackgroundState() {
-        if (isTransparentBg) {
-            rootLayout.setBackgroundColor(Color.TRANSPARENT)
-        } else {
-            rootLayout.setBackgroundColor(Color.parseColor("#181818"))
-        }
+        rootLayout.setBackgroundColor(Color.TRANSPARENT)
+        doodleView.isTransparentBg = isTransparentBg
     }
 
     private fun showSaveImageDialog() {
@@ -549,9 +708,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveAndPinWidget() {
         val bmp = doodleView.getDoodleBitmap() ?: return
+        val bmpCopy = bmp.copy(Bitmap.Config.ARGB_8888, false) ?: return
         btnDone.isEnabled = false
-
-        val bmpCopy = bmp.copy(bmp.config, false)
 
         lifecycleScope.launch(Dispatchers.IO) {
             val file = File(filesDir, "doodle.png")
@@ -566,6 +724,9 @@ class MainActivity : AppCompatActivity() {
                 val existingIds = appWidgetManager.getAppWidgetIds(provider)
 
                 if (existingIds.isNotEmpty()) {
+                    for (id in existingIds) {
+                        DoodleWidget.updateAppWidget(this@MainActivity, appWidgetManager, id)
+                    }
                     val intent = Intent(this@MainActivity, DoodleWidget::class.java).apply {
                         action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
                         putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, existingIds)
